@@ -1,0 +1,22 @@
+@SampleID:
+@Version:0.9.1
+@Ranks:superkingdom|phylum|class|order|family|genus|species|strain
+
+@@TAXID	RANK	TAXPATH	TAXPATHSN	PERCENTAGE	_CAMI_genomeID	_CAMI_OTU
+2	superkingdom	2	Bacteria	100.0000		
+1224	phylum	2|1224	Bacteria|Pseudomonadota	50.0000		
+2818505	phylum	2|2818505	Bacteria|Myxococcota	50.0000		
+1236	class	2|1224|1236	Bacteria|Pseudomonadota|Gammaproteobacteria	50.0000		
+32015	class	2|2818505|32015	Bacteria|Myxococcota|Myxococcia	50.0000		
+91347	order	2|1224|1236|91347	Bacteria|Pseudomonadota|Gammaproteobacteria|Enterobacterales	50.0000		
+29	order	2|2818505|32015|29	Bacteria|Myxococcota|Myxococcia|Myxococcales	50.0000		
+543	family	2|1224|1236|91347|543	Bacteria|Pseudomonadota|Gammaproteobacteria|Enterobacterales|Enterobacteriaceae	50.0000		
+31	family	2|2818505|32015|29|31	Bacteria|Myxococcota|Myxococcia|Myxococcales|Myxococcaceae	50.0000		
+561	genus	2|1224|1236|91347|543|561	Bacteria|Pseudomonadota|Gammaproteobacteria|Enterobacterales|Enterobacteriaceae|Escherichia	50.0000		
+32	genus	2|2818505|32015|29|31|32	Bacteria|Myxococcota|Myxococcia|Myxococcales|Myxococcaceae|Myxococcus	50.0000		
+562	species	2|1224|1236|91347|543|561|562	Bacteria|Pseudomonadota|Gammaproteobacteria|Enterobacterales|Enterobacteriaceae|Escherichia|Escherichia coli	50.0000		
+34	species	2|2818505|32015|29|31|32|34	Bacteria|Myxococcota|Myxococcia|Myxococcales|Myxococcaceae|Myxococcus|Myxococcus xanthus	50.0000		
+562.1	strain	2|1224|1236|91347|543|561|562|562.1	Bacteria|Pseudomonadota|Gammaproteobacteria|Enterobacterales|Enterobacteriaceae|Escherichia|Escherichia coli|Escherichia coli strain	20.0000	GCF_003790525.1_ASM379052v1	562
+562.2	strain	2|1224|1236|91347|543|561|562|562.2	Bacteria|Pseudomonadota|Gammaproteobacteria|Enterobacterales|Enterobacteriaceae|Escherichia|Escherichia coli|Escherichia coli strain	30.0000	GCF_024223415.1_ASM2422341v1	562
+34.1	strain	2|2818505|32015|29|31|32|34|34.1	Bacteria|Myxococcota|Myxococcia|Myxococcales|Myxococcaceae|Myxococcus|Myxococcus xanthus|Myxococcus xanthus strain	10.0000	GCF_006400955.1_ASM640095v1	34
+34.2	strain	2|2818505|32015|29|31|32|34|34.2	Bacteria|Myxococcota|Myxococcia|Myxococcales|Myxococcaceae|Myxococcus|Myxococcus xanthus|Myxococcus xanthus strain	40.0000	GCF_006401215.1_ASM640121v1	34
