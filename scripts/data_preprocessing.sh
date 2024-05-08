@@ -1,0 +1,233 @@
+#!/bin/bash
+
+set -e
+function print_help() {
+  echo ""
+  echo "Strain-level taxonomic classification of metagenomic data using pangenome graphs(data preprocessing)"
+  echo ""
+  echo "Author: XX"
+  echo "Date:   XX"
+  echo ""
+  echo "    General options:"
+  echo "        --help, -h                        Print this help message."
+  echo "        -r <value>                        Refseq database path."
+  echo "        -o <value>                        Output genomes database path."
+  echo "        -s <value>                        Assembly summary file path."
+  echo "        -g <value>                        Output genomes information file."
+  echo "        --custom, -c <value>              Specify custom complete genomes database(use without -r -s). A file format: genomeID\tstrain_taxid\tspecies_taxid\ttorganism_name\tid."
+  echo "    Alternative options:"
+  echo "        --remove                          Whether to remove plasmid."
+  echo "        --cluster                         Whether to cluster and remove redundancy."
+  echo "            -m <value>                    Max genomes number used to cluster every species(default:100)."
+  echo "            -n <value>                    Max genomes number used to build pangenome every species(default:10)."
+  echo "            -p <value>                    Number of parallel processes used for ANI calculation(default:2)."
+  echo "            -j <value>                    Number of parallel processes used for fastANI(default:32)."
+  exit 1
+}
+
+output_database="db"
+summary_file="assembly_summary_bacteria.txt"
+
+custom_db="False"
+remove="False"
+cluster="False"
+cluster_max_genome=100
+pan_max_genome=10
+species_cal_parllel_num=2
+fastani_process=32
+
+timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+echo "$timestamp - $0 $@"
+
+#Print help if no argument specified
+if [[ "$1" == "" ]]; then
+  print_help
+fi
+
+while [[ "$1" != "" ]]; do
+    case "$1" in
+    "--help" | "-h")
+        print_help
+        ;;
+    "-r")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        refseq_database="$2"
+        shift 2
+        ;;
+        esac
+        ;;    
+    "-o")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        output_database="$2"
+        shift 2
+        ;;
+        esac
+        ;; 
+    "-s")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        summary_file="$2"
+        shift 2
+        ;;
+        esac
+        ;; 
+    "-g")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        genomes_info="$2"
+        shift 2
+        ;;
+        esac
+        ;; 
+    "-c" | "--custom")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        custom_db="$2"
+        shift 2
+        ;;
+        esac
+        ;; 
+    "--remove")
+        remove="True"
+        shift 1
+        ;;
+    "--cluster")
+        cluster="True"
+        shift 1
+        ;;
+    "-m")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        cluster_max_genome="$2"
+        shift 2
+        ;;
+        esac
+        ;; 
+    "-n")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        pan_max_genome="$2"
+        shift 2
+        ;;
+        esac
+        ;;
+    "-p")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        species_cal_parllel_num="$2"
+        shift 2
+        ;;
+        esac
+        ;;
+    "-j")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        fastani_process="$2"
+        shift 2
+        ;;
+        esac
+        ;;  
+    --)
+        shift
+        break
+        ;;
+    *)
+        echo "Error: invalid option \"$1\""
+        exit 1
+        ;;
+    esac
+done
+
+output_database=$(readlink -f $output_database)
+script_path=$(readlink -f $0)
+script_dir=$(dirname $script_path)
+
+if [ ! -d $output_database ]; then
+    mkdir -p $output_database
+fi
+
+if [ ! -d $output_database/library ]; then
+    mkdir -p $output_database/library
+fi
+
+if [ ! -d $output_database/output_cluster ]; then
+    mkdir -p $output_database/output_cluster
+fi
+
+complete_genomes="complete_genomes.txt"
+genome_statics="genome_statics.txt"
+genomes_info_provided_origin="genomes_info_provided_origin.txt"
+if [ -e $custom_db ]; then
+    # this step will produce two files in running path
+    python $script_dir/extract_complete_genome.py -o $output_database/library -c $custom_db --remove $remove
+    if [ $cluster == "True" ]; then
+        if [ -e "$complete_genomes" ] && [ ! -e "$genome_statics" ]; then
+            python $script_dir/staticsData.py --filelist $complete_genomes
+        fi    
+        python $script_dir/genomes_cluster.py -i $output_database/library/$genomes_info_provided_origin -d $output_database/library -o $output_database/output_cluster -m $cluster_max_genome -n $pan_max_genome -p $species_cal_parllel_num -j $fastani_process
+        find $output_database/output_cluster -name "*fna" > used_genomes.txt
+        python $script_dir/get_genomes_info.py -c $output_database/library/$genomes_info_provided_origin -o $output_database/library
+    elif [ $cluster == "False" ]; then
+        mv $output_database/library/$genomes_info_provided_origin $output_database/library/genomes_info.txt
+    fi
+else
+    if [ ! -e $summary_file ]; then
+        echo "Assembly summary file does not exist, prepare to download..."
+        wget -c ftp://ftp.ncbi.nlm.nih.gov/genomes/refseq/bacteria/assembly_summary.txt -O $output_database/library/assembly_summary_bacteria.txt
+        summary_file=$output_database/library/assembly_summary_bacteria.txt
+    fi
+    python $script_dir/extract_complete_genome.py -r $refseq_database -o $output_database/library -s $summary_file --remove $remove
+    if [ $cluster == "True" ]; then
+        if [ -e "$complete_genomes" ] && [ ! -e "$genome_statics" ]; then
+            python $script_dir/staticsData.py --filelist $complete_genomes
+        fi    
+        python $script_dir/genomes_cluster.py -s $summary_file -i $output_database/library/$genomes_info_provided_origin -d $output_database/library -o $output_database/output_cluster -m $cluster_max_genome -n $pan_max_genome -p $species_cal_parllel_num -j $fastani_process
+        find $output_database/output_cluster -name "*fna" > used_genomes.txt
+        python $script_dir/get_genomes_info.py -c $output_database/library/$genomes_info_provided_origin -o $output_database/library
+    elif [ $cluster == "False" ]; then
+        mv $output_database/library/$genomes_info_provided_origin $output_database/library/genomes_info.txt
+    fi
+fi
+if [ $cluster == "True" ]; then
+    rm $complete_genomes $genome_statics used_genomes.txt
+fi
+timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+echo "$timestamp - $0 - INFO: Data preprocessing completely"

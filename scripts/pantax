@@ -1,0 +1,525 @@
+#!/bin/bash
+
+set -e
+function print_help() {
+  echo "Usage: $0 -f genomes_info -s/-l -r read.fq [option]"
+  echo "       paired-end: $0 -f genomes_info -s -p -r read.fq --species-level"
+  echo ""
+  echo "Strain-level taxonomic classification of metagenomic data using pangenome graphs"
+  echo ""
+  echo "Author: XX"
+  echo "Date:   XX"
+  echo ""
+  echo "    General options:"
+  echo "        --create                          Create database only"
+  echo "        -v, --verbose                     Detailed database build log"
+  echo "        -t, --threads INT                 Number of processes to run in parallel (default: 64)."
+  echo "        --help, -h                        Print this help message."
+  echo "    Database creation:"
+  echo "        -f, --genomesInformation FILE:    A list of reference genomes in specified format (Mandatory)."
+  echo "        -db NAME                         Name for pantax DB (default: none)"
+  echo "    Index construction:"
+  echo "        -s, --short-read                  Short read alignment"
+  echo "        --best                            Best autoindex(only used with -s)"
+  echo "        -l, --long-read                   Long read alignment"
+  echo "        --fast                            Fast index(only used with -l)"
+  echo "    Read classification:"
+  echo "        -r, --fastq-in FILE               Read and align FASTQ-format reads from FILE (two are allowed with -p)"
+  echo "        -p, --paired                      For paired-end alignment"
+  echo "    Abundacnce calculation:"
+  echo "        --species-level                   Species abundance calulation"
+  echo "        --strain-level                    Strain abundance calulation"
+  echo "        -a float                          Species with more than abundance threshold used for strain abundance calulation.(default: 0.0001) "
+  echo "        -fr float                         Unique trio nodes fraction(default: 0.3)"
+  echo "        -fc float                         Unique trio nodes mean count fraction(default: 0.45)"
+  echo "        --filter                          MAPQ-based filter"
+  echo "        --min_cov int                     Minimum coverage required per strain(default: 0)"
+  echo "        --min_depth int                   Graph nodes with sequence depth less than <min_depth>(default: 0)"
+  echo "        -gt int                           Gurobi threads"
+  echo "        -g, --save                        Save species graph information"
+  echo "        -S, --classified-out FILENAME     File for alignment output(suffix)"
+  echo "        -R, --report FILENAME             File for read classification output(suffix)"
+  echo "        -o, --ouput FILENAME              File for abundance output(suffix)"
+  echo ""
+  exit 0
+}
+
+timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+echo "$timestamp - $0 $@"
+
+pantax_db="pantax_db"
+genomes_info="/home/work/wenhai/PanTax/data_preprocessing/genomes_info.txt"
+create_db="False"
+verbose="False"
+short_reads="False"
+long_reads="False"
+pair_short_read="False"
+short_read_best_alignment="False"
+long_read_fast_alignment="False"
+input_fq="/home/work/wenhai/PanTax/sample/sample_ngs_data/2024.02.05_10.54.22_sample_0/reads/anonymous_reads.fq.gz"
+threads=64
+gurobi_threads=1
+
+species_level_flag="True"
+strain_level_flag="False"
+isfilter=0
+save=0
+species_abund_threshold=0.0001
+unique_trio_nodes_fraction=0.3
+unique_trio_nodes_count=0.45
+min_cov=0
+min_depth=0
+
+wd=$(pwd)
+# read_aln=$wd/gfa_mapped.gaf
+pantax_report=$wd/pantax_report.csv
+
+#Print help if no argument specified
+if [[ "$1" == "" ]]; then
+  print_help
+fi
+
+while [[ "$1" != "" ]]; do
+    case "$1" in
+    "--help" | "-h")
+        print_help
+        ;;
+    "--create")
+        create_db="True"
+        shift 1
+        ;;
+    "-v" | "--verbose")
+        verbose="True"
+        shift 1
+        ;;
+    "-f" | "--genomesInformation")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        genomes_info="$2"
+        shift 2
+        ;;
+        esac
+        ;;
+    "-db")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        pantax_db="$2"
+        shift 2
+        ;;
+        esac
+        ;;
+    "-s" | "--short-read")
+        short_reads="True"
+        shift 1
+        ;;
+    "-l" | "--long-read")
+        long_reads="True"
+        shift 1
+        ;;
+    "--best")
+        short_read_best_alignment="True"
+        shift 1
+        ;;
+    "--fast")
+        long_read_fast_alignment="True"
+        shift 1
+        ;;     
+    "-r" | "--fastq-in")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        input_fq="$2"
+        shift 2
+        ;;
+        esac
+        ;;
+    "-p" | "--paired")
+        pair_short_read="True"
+        shift 1
+        ;;
+
+    "--strain-level")
+        strain_level_flag="True"
+        shift 1
+        ;;
+    "--species-level")
+        species_level_flag="True"
+        shift 1
+        ;;
+    "--filter")
+        isfilter=1
+        shift 1
+        ;;
+    "-a")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        species_abund_threshold="$2"
+        shift 2
+        ;;
+        esac
+        ;;
+    "-fr")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        unique_trio_nodes_fraction="$2"
+        shift 2
+        ;;
+        esac
+        ;;    
+    "-fc")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        unique_trio_nodes_count="$2"
+        shift 2
+        ;;
+        esac
+        ;;     
+    "--min_cov")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        min_cov="$2"
+        shift 2
+        ;;
+        esac
+        ;;
+    "--min_depth")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        min_depth="$2"
+        shift 2
+        ;;
+        esac
+        ;;
+    "-g" | "--save")
+        save=1
+        shift 1
+        ;;                
+    "-S" | "--classified-out")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        read_aln="$2".gaf
+        shift 2
+        ;;
+        esac
+        ;;                                                                           
+    "-R" | "--report")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        pantax_report="$2".csv
+        shift 2
+        ;;
+        esac
+        ;; 
+    "-o" | "--output")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        pantax_output=$2
+        shift 2
+        ;;
+        esac
+        ;; 
+    "-t" | "--threads")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        threads="$2"
+        shift 2
+        ;;
+        esac
+        ;;      
+    "-gt")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        gurobi_threads="$2"
+        shift 2
+        ;;
+        esac
+        ;;                                                              
+    --)
+        shift
+        break
+        ;;
+    *)
+        echo "Error: invalid option \"$1\""
+        exit 1
+        ;;
+    esac
+done
+
+if [ -e $genomes_info ]; then
+    genomes_info=$(readlink -f $genomes_info)
+else
+    echo "$genomes_info does not exist!"
+    exit 1
+fi
+
+if [ $create_db == "False" ]; then
+    if [ -e $input_fq ]; then
+        input_fq=$(readlink -f $input_fq)
+    else
+        echo "$input_fq does not exist!"
+        exit 1    
+    fi
+
+    # if [ $isfilter == 1 ]; then
+    #     isfilter_flag=1
+    # else
+    #     isfilter_flag=0
+    # fi
+    isfilter_flag=1
+
+    echo "Parameters settings:"
+    echo "  threads: $threads"
+    echo "Database creation:"
+    echo "  genomes_info: $genomes_info"
+    echo "  pantax_db: $pantax_db"
+    echo "Index construction:"
+    if [ $short_reads == "True" ]; then
+        echo "  short_reads: $short_reads"
+    elif [ $long_reads == "True" ]; then
+        echo "  long_reads: $long_reads"
+    else 
+        echo "No read type!"
+        exit 1
+    fi
+    echo "Read classification:"
+    echo "  input_fq: $input_fq"
+    echo "  strain_level_flag: $strain_level_flag"
+    echo "  species_level_flag: $species_level_flag"
+fi
+script_path=$(readlink -f $0)
+script_dir=$(dirname $script_path)
+tools_dir=$(dirname $script_dir)/tools
+
+if [ ! -d $pantax_db ]; then
+    mkdir -p $pantax_db
+# else
+#     rm -rf $pantax_db
+#     mkdir -p $pantax_db
+fi
+pantax_db=$(readlink -f $pantax_db)
+# cd $pantax_db
+if [ -d tmp ]; then
+    rm -rf tmp
+fi
+mkdir -p tmp
+tmp_dir=$(readlink -f tmp)
+cd $tmp_dir
+
+if [ ! -f $pantax_db/reference_pangenome.gfa ]; then 
+    new_pantax_db=$pantax_db
+    pantax_db=$tmp_dir
+    reconstruction_flag="True"
+else
+    reconstruction_flag="False"
+fi
+
+if [ $reconstruction_flag == "True" ]; then 
+    echo "$(date "+%Y-%m-%d %H:%M:%S") - Building reference pangenome ..."
+    # Prepare genomes information. Return pggb_species directory and species_eq1_genomes.txt
+    # Species(in pggb_species directory) more than 2 genomes will be used to build pangenome firstly.
+    python $script_dir/prepare_building.py $genomes_info
+
+    # build pangenome with pggb
+    mkdir -p gfa_build
+    cd gfa_build
+    if [ -d $tmp_dir/pggb_species ]; then
+        count=$(ls $tmp_dir/pggb_species | wc -l)
+        if [ $count -ne 0 ]; then
+            ls $tmp_dir/pggb_species/*.txt | while read f; do
+                species_dir=$(basename $f)
+                species_dir=${species_dir%.txt}
+                if [ ! -d $species_dir ]; then
+                    mkdir -p $species_dir
+                fi
+                while IFS= read genome; do
+                    sample_genome=$(basename $genome | cut -f 1,2 -d '_')
+                    # echo $genome
+                    $tools_dir/fastix/bin/fastix $genome -p "${sample_genome}#1#" | bgzip -@ $threads -c > ${species_dir}/${sample_genome}.fa.gz
+                done < $f
+                genomes_list=$(find $species_dir -name "*.fa.gz" -exec echo -n "{} " \;)
+                num=$(ls $species_dir/*.fa.gz | wc -l)
+                merge_file=${species_dir}/${species_dir}_merged.fa.gz
+                zcat $genomes_list | bgzip -c -@ $threads > $merge_file
+                samtools faidx $merge_file
+                if [ $verbose == "True" ]; then
+                    pggb -i $merge_file -o ${species_dir}/species${species_dir}_pggb -t $threads -p 90 -n $num -v
+                elif [ $verbose == "False" ]; then
+                    pggb -i $merge_file -o ${species_dir}/species${species_dir}_pggb -t $threads -p 90 -n $num -v > /dev/null 2>&1
+                fi
+            done
+        fi
+    fi
+    cd ..
+
+    # build variation graph for the species with one genomes
+    python $script_dir/build_graph.py species_eq1_genomes.txt
+    # rm -rf pggb_species species_eq1_genomes.txt
+    find gfa_build -type f -name "*.gfa" -exec bash -c 'input={}; name=$(basename $input); output=${name%%.*}.vg; vg convert -g $input -p > gfa_build/$output' \;
+    vg_files=$(ls gfa_build/*.vg)
+    vg combine -p $vg_files > reference_pangenome.vg
+    vg convert -f reference_pangenome.vg > reference_pangenome.gfa
+    rm reference_pangenome.vg
+    python $script_dir/otu_range.py reference_pangenome.gfa $genomes_info --species-level 1 --strain-level 0
+    # extract gfa files for strain abundance computing
+    mkdir -p species_gfa
+    find gfa_build -name "*gfa" -exec bash -c 'input={}; name=$(basename $input); output=${name%%_merge*}.gfa; mv $input species_gfa/$output' \;
+    mv species_gfa reference_pangenome* species_range.txt $new_pantax_db
+    pantax_db=$new_pantax_db
+    echo "$(date "+%Y-%m-%d %H:%M:%S") - Building reference pangenome completely."
+else
+    echo "$(date "+%Y-%m-%d %H:%M:%S") - Reference_pangenome.gfa exists. Skipping."
+fi
+
+if [ $create_db == "True" ];then
+    cd ..
+    rm -rf tmp
+    exit 0
+fi
+
+if [ $short_reads == "True" ] || [ $long_read_fast_alignment == "True" ]; then
+    echo "$(date "+%Y-%m-%d %H:%M:%S") - Reads alignment with vg giraffe."    
+    # this step produce three index files: reference_pangenome.giraffe.gbz, reference_pangenome.dist, reference_pangenome.min.
+    # default mode(quick)
+    if [ $reconstruction_flag == "True" ]; then
+        echo "$(date "+%Y-%m-%d %H:%M:%S") - Construct index...."
+        if [ $short_read_best_alignment == "False" ] && [ ! -e $pantax_db/reference_pangenome.min ]; then
+            # # these commands all can show progress with option -p
+            vg gbwt -g reference_pangenome.giraffe.gbz --gbz-format -G $pantax_db/reference_pangenome.gfa
+            vg index -j reference_pangenome.dist reference_pangenome.giraffe.gbz
+            vg minimizer -d reference_pangenome.dist -o reference_pangenome.min reference_pangenome.giraffe.gbz
+        else
+            vg autoindex -p reference_pangenome -w giraffe -g $pantax_db/reference_pangenome.gfa -t $threads
+        fi
+        mv reference_pangenome* $pantax_db
+    fi
+    echo "$(date "+%Y-%m-%d %H:%M:%S") - vg giraffe mapping..."
+    # vg giraffe -Z reference_pangenome.giraffe.gbz -m reference_pangenome.min -d reference_pangenome.dist -i -f $input_fq -t $threads --named-coordinates > gfa_mapped.gam
+    # vg convert -a gfa_mapped.gam -j > gfa_mapped.json
+    if [ $pair_short_read == "True" ]; then
+        vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -i -f $input_fq -t $threads --named-coordinates -o gaf > gfa_mapped.gaf
+    elif [ $pair_short_read == "False" ]; then
+        vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -f $input_fq -t $threads --named-coordinates -o gaf > gfa_mapped.gaf
+    fi
+    if [ $strain_level_flag == "True" ]; then
+        vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -i -f $input_fq -t $threads --named-coordinates -o json > gfa_mapped.json
+    fi
+fi
+
+if [ $long_reads == "True" ] && [ $long_read_fast_alignment == "False" ]; then
+    echo "$(date "+%Y-%m-%d %H:%M:%S") - Reads alignment with Graphaligner..."
+    if [ $strain_level_flag == "True" ]; then
+        GraphAligner -g $pantax_db/reference_pangenome.gfa -f $input_fq -a gfa_mapped.gaf -a gfa_mapped.json -x vg -t 64
+        python $script_dir/gaf_filter.py -i gfa_mapped.gaf
+        python $script_dir/gaf_filter.py -i gfa_mapped_filtered.gaf -j gfa_mapped.json -s $pantax_db/species_range.txt
+        # python $script_dir/gaf_filter2.py -i gfa_mapped.gaf
+        # awk 'NR==FNR{lines[$1]; next} FNR in lines' gfa_mapped_filtered_line_numbers.txt gfa_mapped.json > gfa_mapped_filtered.json
+        mv gfa_mapped_filtered.gaf gfa_mapped.gaf
+        mv gfa_mapped_filtered.json gfa_mapped.json
+    else
+        GraphAligner -g $pantax_db/reference_pangenome.gfa -f $input_fq -a gfa_mapped.gaf -x vg -t 64
+        python $script_dir/gaf_filter.py -i gfa_mapped.gaf
+        mv gfa_mapped_filtered.gaf gfa_mapped.gaf
+    fi
+fi
+
+if [ -f "gfa_mapped.gaf" ] && [ -f $pantax_db/species_range.txt ]; then
+    echo "$(date "+%Y-%m-%d %H:%M:%S") - Read classification..."
+    # python $script_dir/read_classification2.py species_range.txt gfa_mapped.json
+    python $script_dir/read_classification.py -s $pantax_db/species_range.txt -m gfa_mapped.gaf
+else
+    exit 1 
+fi
+
+if [ $species_level_flag == "True" ]; then
+    echo "$(date "+%Y-%m-%d %H:%M:%S") - Species abundance estimation..."
+    if [ $short_reads == "True" ]; then
+        python $script_dir/species_abundance_cal.py $genomes_info reads_classification.csv short -ft $isfilter_flag
+    elif [ $long_reads == "True" ]; then
+        python $script_dir/species_abundance_cal.py $genomes_info reads_classification.csv long -ft $isfilter_flag
+    fi
+    if [ $pantax_output ]; then
+        specie_abund_file=$wd/species_abundance_$pantax_output.txt
+        mv species_abundance.txt $specie_abund_file        
+    else
+        specie_abund_file=$wd/species_abundance.txt
+        mv species_abundance.txt $wd
+    fi
+fi 
+
+
+if [ $strain_level_flag == "True" ]; then
+    echo "$(date "+%Y-%m-%d %H:%M:%S") - Strain abundance estimation..."
+    python $script_dir/strain_abundance_cal.py -a $species_abund_threshold -fr $unique_trio_nodes_fraction -fc $unique_trio_nodes_count -c $min_cov -d $min_depth -t $threads -gt $gurobi_threads -s $save $pantax_db $genomes_info reads_classification.csv gfa_mapped.json $pantax_db/species_range.txt $specie_abund_file 
+    if [ $save == 1 ]; then
+        if [ $reconstruction_flag == "False" ]; then
+            mv species_graph_info $pantax_db
+        else
+            mv species_graph_info $new_pantax_db
+        fi
+    fi
+    if [ $pantax_output ]; then
+        mv strain_abundance.txt $wd/strain_abundance_$pantax_output.txt
+    else 
+        mv strain_abundance.txt $wd
+    fi
+fi
+
+if [ $read_aln ]; then
+    mv gfa_mapped.gaf $wd/$read_aln
+fi
+mv reads_classification.csv $pantax_report
+
+cd ..
+rm -rf tmp
+echo "$(date "+%Y-%m-%d %H:%M:%S") - PanTax Done."
