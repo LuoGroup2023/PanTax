@@ -149,10 +149,7 @@ def parallel_optimize_otu(otu, otu_range, pantax_db, aln_file, min_depth, reduce
     return [(otu, hap_id, x[i]) for i, hap_id in enumerate(haps_id)]
 
 def read_cls(otu_range_file, species_abundance_file, min_species_abundance=1e-04):
-    try:
-        species_abundance = pd.read_csv(species_abundance_file, sep="\t", dtype={0:str, 1:float, 2:float}, header=None)
-    except:
-        species_abundance = pd.read_csv(species_abundance_file, sep="\t", dtype={0:str, 1:float, 2:float})
+    species_abundance = pd.read_csv(species_abundance_file, sep="\t", dtype={0:str, 1:float, 2:float})
     species_abundance.columns = ["species_taxid", "abundance", "coverage"]
     species_abundance = species_abundance[species_abundance["abundance"] > min_species_abundance]
     otu_list = species_abundance["species_taxid"].tolist()
@@ -247,10 +244,7 @@ def abundance_cal(otu_cov, genomes_info):
     new_otu_cov_df.to_csv("strain_abundance.txt", sep="\t", index=False)
 
 def abundace_constraint(otu_mapping_list, species_abundance_file):
-    try:
-        species_abundance_df = pd.read_csv(species_abundance_file, sep="\t")
-    except:
-        species_abundance_df = pd.read_csv(species_abundance_file, sep="\t", header=None)
+    species_abundance_df = pd.read_csv(species_abundance_file, sep="\t")
     species_abundance_df.columns = ["species_taxid", "abundance", "avg_coverage"]
     species_abundance_df["species_taxid"] = species_abundance_df["species_taxid"].astype(str)
     species_taxid = otu_mapping_list[0][0]
