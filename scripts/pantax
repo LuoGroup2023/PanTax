@@ -464,6 +464,8 @@ if [ $long_reads == "True" ] && [ $long_read_fast_alignment == "False" ]; then
         python $script_dir/gaf_filter.py -i gfa_mapped_filtered.gaf -j gfa_mapped.json -s $pantax_db/species_range.txt
         # python $script_dir/gaf_filter2.py -i gfa_mapped.gaf
         # awk 'NR==FNR{lines[$1]; next} FNR in lines' gfa_mapped_filtered_line_numbers.txt gfa_mapped.json > gfa_mapped_filtered.json
+        # cp gfa_mapped.gaf gfa_mapped_old.gaf
+        # cp gfa_mapped.json gfa_mapped_old.json
         mv gfa_mapped_filtered.gaf gfa_mapped.gaf
         mv gfa_mapped_filtered.json gfa_mapped.json
     else

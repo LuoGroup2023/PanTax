@@ -61,6 +61,8 @@ def json_filter(gaf_file, json_file, species_range_file):
                 path = aln["path"]
                 mapping = path["mapping"]
                 read_info = reads_info[read_id]
+                if len(aln["sequence"]) < 200:
+                    continue
             except KeyError:
                 # read unmapped
                 continue
