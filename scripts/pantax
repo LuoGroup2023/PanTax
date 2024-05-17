@@ -48,7 +48,6 @@ timestamp=$(date "+%Y-%m-%d %H:%M:%S")
 echo "$timestamp - $0 $@"
 
 pantax_db="pantax_db"
-genomes_info="/home/work/wenhai/PanTax/data_preprocessing/genomes_info.txt"
 create_db="False"
 verbose="False"
 short_reads="False"
@@ -56,7 +55,6 @@ long_reads="False"
 pair_short_read="False"
 short_read_best_alignment="False"
 long_read_fast_alignment="False"
-input_fq="/home/work/wenhai/PanTax/sample/sample_ngs_data/2024.02.05_10.54.22_sample_0/reads/anonymous_reads.fq.gz"
 threads=64
 gurobi_threads=1
 
@@ -296,18 +294,18 @@ while [[ "$1" != "" ]]; do
     esac
 done
 
-if [ -e $genomes_info ]; then
+if [ $genomes_info ]; then
     genomes_info=$(readlink -f $genomes_info)
 else
-    echo "$genomes_info does not exist!"
+    echo "genomes information file does not exist!"
     exit 1
 fi
 
 if [ $create_db == "False" ]; then
-    if [ -e $input_fq ]; then
+    if [ $input_fq ]; then
         input_fq=$(readlink -f $input_fq)
     else
-        echo "$input_fq does not exist!"
+        echo "fastq file does not exist!"
         exit 1    
     fi
 
