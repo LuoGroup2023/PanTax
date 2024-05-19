@@ -2,8 +2,8 @@ name: Pantax
 channels:
   - gurobi
   - bioconda
-  - http://mirrors.aliyun.com/anaconda/cloud/bioconda
-  - https://mirrors.bfsu.edu.cn/anaconda/cloud/conda-forge
+  - bioconda
+  - conda-forge
   - defaults
 dependencies:
   - _libgcc_mutex=0.1=conda_forge
@@ -193,6 +193,7 @@ dependencies:
   - rich-click=1.7.3=pyhd8ed1ab_0
   - rust=1.76.0=h6a678d5_0
   - s2n=1.3.27=hdbd6064_0
+  - samtools=1.19.2=h50ea8bc_1
   - scipy=1.12.0=py310hb13e2d6_2
   - seqwish=0.7.9=h43eeafb_2
   - setuptools=69.0.3=pyhd8ed1ab_0
@@ -252,4 +253,3 @@ dependencies:
   - zlib=1.2.13=hd590300_5
   - zstandard=0.22.0=py310h1275a96_0
   - zstd=1.5.5=hfc55251_0
-prefix: /home/wenhai/miniconda3/envs/Pantax

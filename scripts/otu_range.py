@@ -117,8 +117,9 @@ class OtuRangeProcessor:
                 else:
                     print("the order is error")
                     break
-            if count == len(sorted_keys):
-                print("the order is right")
+            assert count == len(sorted_keys)
+            # if count == len(sorted_keys):
+                # print("the order is right")
         return sorted_data
 
     def parallel(self, flag):

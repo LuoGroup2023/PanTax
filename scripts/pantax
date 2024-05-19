@@ -7,39 +7,41 @@ function print_help() {
   echo ""
   echo "Strain-level taxonomic classification of metagenomic data using pangenome graphs"
   echo ""
-  echo "Author: XX"
-  echo "Date:   XX"
+  echo "Author: Weihai Zhang"
+  echo "Date:   May 2024"
   echo ""
   echo "    General options:"
-  echo "        --create                          Create database only"
-  echo "        -v, --verbose                     Detailed database build log"
+  echo "        --create                          Create database only."
+  echo "        --vg                              Path to vg executable file."
+  echo "        -v, --verbose                     Detailed database build log."
   echo "        -t, --threads INT                 Number of processes to run in parallel (default: 64)."
   echo "        --help, -h                        Print this help message."
+  echo "        --version                         Print the version info."
   echo "    Database creation:"
   echo "        -f, --genomesInformation FILE:    A list of reference genomes in specified format (Mandatory)."
-  echo "        -db NAME                         Name for pantax DB (default: none)"
+  echo "        -db NAME                          Name for pantax DB (default: none)."
   echo "    Index construction:"
-  echo "        -s, --short-read                  Short read alignment"
-  echo "        --best                            Best autoindex(only used with -s)"
-  echo "        -l, --long-read                   Long read alignment"
-  echo "        --fast                            Fast index(only used with -l)"
+  echo "        -s, --short-read                  Short read alignment."
+  echo "        --best                            Best autoindex(only used with -s)."
+  echo "        -l, --long-read                   Long read alignment."
+  echo "        --fast                            Fast index(only used with -l)."
   echo "    Read classification:"
-  echo "        -r, --fastq-in FILE               Read and align FASTQ-format reads from FILE (two are allowed with -p)"
-  echo "        -p, --paired                      For paired-end alignment"
+  echo "        -r, --fastq-in FILE               Read and align FASTQ-format reads from FILE (two are allowed with -p)."
+  echo "        -p, --paired                      For paired-end alignment."
   echo "    Abundacnce calculation:"
-  echo "        --species-level                   Species abundance calulation"
-  echo "        --strain-level                    Strain abundance calulation"
-  echo "        -a float                          Species with more than abundance threshold used for strain abundance calulation.(default: 0.0001) "
-  echo "        -fr float                         Unique trio nodes fraction(default: 0.3)"
-  echo "        -fc float                         Unique trio nodes mean count fraction(default: 0.45)"
-  echo "        --filter                          MAPQ-based filter"
-  echo "        --min_cov int                     Minimum coverage required per strain(default: 0)"
-  echo "        --min_depth int                   Graph nodes with sequence depth less than <min_depth>(default: 0)"
-  echo "        -gt int                           Gurobi threads"
-  echo "        -g, --save                        Save species graph information"
-  echo "        -S, --classified-out FILENAME     File for alignment output(suffix)"
-  echo "        -R, --report FILENAME             File for read classification output(suffix)"
-  echo "        -o, --ouput FILENAME              File for abundance output(suffix)"
+  echo "        --species-level                   Species abundance calulation."
+  echo "        --strain-level                    Strain abundance calulation."
+  echo "        -a float                          Species with more than abundance threshold used for strain abundance calulation.(default: 0.0001)."
+  echo "        -fr float                         Unique trio nodes fraction(default: 0.3)."
+  echo "        -fc float                         Unique trio nodes mean count fraction(default: 0.45)."
+  echo "        --filter                          MAPQ-based filter."
+  echo "        --min_cov int                     Minimum coverage required per strain(default: 0)."
+  echo "        --min_depth int                   Graph nodes with sequence depth less than <min_depth>(default: 0)."
+  echo "        -gt int                           Gurobi threads."
+  echo "        -g, --save                        Save species graph information."
+  echo "        -S, --classified-out FILENAME     File for alignment output(suffix)."
+  echo "        -R, --report FILENAME             File for read classification output(suffix)."
+  echo "        -o, --ouput FILENAME              File for abundance output(suffix)."
   echo ""
   exit 0
 }
@@ -69,8 +71,7 @@ min_cov=0
 min_depth=0
 
 wd=$(pwd)
-# read_aln=$wd/gfa_mapped.gaf
-pantax_report=$wd/pantax_report.csv
+pantax_report=pantax_report.csv
 
 #Print help if no argument specified
 if [[ "$1" == "" ]]; then
@@ -82,9 +83,25 @@ while [[ "$1" != "" ]]; do
     "--help" | "-h")
         print_help
         ;;
+    "--version")
+        echo "PanTax version v1.0.0"
+        exit 0 
+        ;;
     "--create")
         create_db="True"
         shift 1
+        ;;
+    "--vg")
+        case "$2" in
+        "")
+        echo "Error: $1 expects an argument"
+        exit 1
+        ;;
+        *)
+        vg="$2"
+        shift 2
+        ;;
+        esac
         ;;
     "-v" | "--verbose")
         verbose="True"
@@ -338,6 +355,11 @@ fi
 script_path=$(readlink -f $0)
 script_dir=$(dirname $script_path)
 tools_dir=$(dirname $script_dir)/tools
+if [ $vg ]; then
+    :
+else
+    vg=$tools_dir/vg
+fi
 
 if [ ! -d $pantax_db ]; then
     mkdir -p $pantax_db
@@ -366,7 +388,7 @@ if [ $reconstruction_flag == "True" ]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Building reference pangenome ..."
     # Prepare genomes information. Return pggb_species directory and species_eq1_genomes.txt
     # Species(in pggb_species directory) more than 2 genomes will be used to build pangenome firstly.
-    python $script_dir/prepare_building.py $genomes_info
+    python $script_dir/prepare_building.py $genomes_info $wd
 
     # build pangenome with pggb
     mkdir -p gfa_build
@@ -403,10 +425,11 @@ if [ $reconstruction_flag == "True" ]; then
     # build variation graph for the species with one genomes
     python $script_dir/build_graph.py species_eq1_genomes.txt
     # rm -rf pggb_species species_eq1_genomes.txt
-    find gfa_build -type f -name "*.gfa" -exec bash -c 'input={}; name=$(basename $input); output=${name%%.*}.vg; vg convert -g $input -p > gfa_build/$output' \;
+    # find gfa_build -type f -name "*.gfa" -exec bash -c 'input={}; name=$(basename $input); output=${name%%.*}.vg; vg convert -g $input -p > gfa_build/$output' \;
+    find gfa_build -type f -name "*.gfa" -exec bash -c 'input="$1"; vg="$2"; name=$(basename "$input"); output=${name%%.*}.vg; "$vg" convert -g "$input" -p > gfa_build/"$output"' _ {} "$vg" \;
     vg_files=$(ls gfa_build/*.vg)
-    vg combine -p $vg_files > reference_pangenome.vg
-    vg convert -f reference_pangenome.vg > reference_pangenome.gfa
+    $vg combine -p $vg_files > reference_pangenome.vg
+    $vg convert -f reference_pangenome.vg > reference_pangenome.gfa
     rm reference_pangenome.vg
     python $script_dir/otu_range.py reference_pangenome.gfa $genomes_info --species-level 1 --strain-level 0
     # extract gfa files for strain abundance computing
@@ -433,31 +456,31 @@ if [ $short_reads == "True" ] || [ $long_read_fast_alignment == "True" ]; then
         echo "$(date "+%Y-%m-%d %H:%M:%S") - Construct index...."
         if [ $short_read_best_alignment == "False" ] && [ ! -e $pantax_db/reference_pangenome.min ]; then
             # # these commands all can show progress with option -p
-            vg gbwt -g reference_pangenome.giraffe.gbz --gbz-format -G $pantax_db/reference_pangenome.gfa
-            vg index -j reference_pangenome.dist reference_pangenome.giraffe.gbz
-            vg minimizer -d reference_pangenome.dist -o reference_pangenome.min reference_pangenome.giraffe.gbz
+            $vg gbwt -g reference_pangenome.giraffe.gbz --gbz-format -G $pantax_db/reference_pangenome.gfa
+            $vg index -j reference_pangenome.dist reference_pangenome.giraffe.gbz
+            $vg minimizer -d reference_pangenome.dist -o reference_pangenome.min reference_pangenome.giraffe.gbz
         else
-            vg autoindex -p reference_pangenome -w giraffe -g $pantax_db/reference_pangenome.gfa -t $threads
+            $vg autoindex -p reference_pangenome -w giraffe -g $pantax_db/reference_pangenome.gfa -t $threads
         fi
         mv reference_pangenome* $pantax_db
     fi
     echo "$(date "+%Y-%m-%d %H:%M:%S") - vg giraffe mapping..."
-    # vg giraffe -Z reference_pangenome.giraffe.gbz -m reference_pangenome.min -d reference_pangenome.dist -i -f $input_fq -t $threads --named-coordinates > gfa_mapped.gam
-    # vg convert -a gfa_mapped.gam -j > gfa_mapped.json
+    # $vg giraffe -Z reference_pangenome.giraffe.gbz -m reference_pangenome.min -d reference_pangenome.dist -i -f $input_fq -t $threads --named-coordinates > gfa_mapped.gam
+    # $vg convert -a gfa_mapped.gam -j > gfa_mapped.json
     if [ $pair_short_read == "True" ]; then
-        vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -i -f $input_fq -t $threads --named-coordinates -o gaf > gfa_mapped.gaf
+        $vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -i -f $input_fq -t $threads --named-coordinates -o gaf > gfa_mapped.gaf
     elif [ $pair_short_read == "False" ]; then
-        vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -f $input_fq -t $threads --named-coordinates -o gaf > gfa_mapped.gaf
+        $vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -f $input_fq -t $threads --named-coordinates -o gaf > gfa_mapped.gaf
     fi
     if [ $strain_level_flag == "True" ]; then
-        vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -i -f $input_fq -t $threads --named-coordinates -o json > gfa_mapped.json
+        $vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -i -f $input_fq -t $threads --named-coordinates -o json > gfa_mapped.json
     fi
 fi
 
 if [ $long_reads == "True" ] && [ $long_read_fast_alignment == "False" ]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Reads alignment with Graphaligner..."
     if [ $strain_level_flag == "True" ]; then
-        GraphAligner -g $pantax_db/reference_pangenome.gfa -f $input_fq -a gfa_mapped.gaf -a gfa_mapped.json -x vg -t 64
+        GraphAligner -g $pantax_db/reference_pangenome.gfa -f $input_fq -a gfa_mapped.gaf -a gfa_mapped.json -x vg -t $threads
         python $script_dir/gaf_filter.py -i gfa_mapped.gaf
         python $script_dir/gaf_filter.py -i gfa_mapped_filtered.gaf -j gfa_mapped.json -s $pantax_db/species_range.txt
         # python $script_dir/gaf_filter2.py -i gfa_mapped.gaf
@@ -467,7 +490,7 @@ if [ $long_reads == "True" ] && [ $long_read_fast_alignment == "False" ]; then
         mv gfa_mapped_filtered.gaf gfa_mapped.gaf
         mv gfa_mapped_filtered.json gfa_mapped.json
     else
-        GraphAligner -g $pantax_db/reference_pangenome.gfa -f $input_fq -a gfa_mapped.gaf -x vg -t 64
+        GraphAligner -g $pantax_db/reference_pangenome.gfa -f $input_fq -a gfa_mapped.gaf -x vg -t $threads
         python $script_dir/gaf_filter.py -i gfa_mapped.gaf
         mv gfa_mapped_filtered.gaf gfa_mapped.gaf
     fi
@@ -484,23 +507,16 @@ fi
 if [ $species_level_flag == "True" ]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Species abundance estimation..."
     if [ $short_reads == "True" ]; then
-        python $script_dir/species_abundance_cal.py $genomes_info reads_classification.csv short -ft $isfilter_flag
+        python $script_dir/species_abundance_cal.py $genomes_info reads_classification.csv short -ft $isfilter_flag $wd
     elif [ $long_reads == "True" ]; then
-        python $script_dir/species_abundance_cal.py $genomes_info reads_classification.csv long -ft $isfilter_flag
-    fi
-    if [ $pantax_output ]; then
-        specie_abund_file=$wd/species_abundance_$pantax_output.txt
-        mv species_abundance.txt $specie_abund_file        
-    else
-        specie_abund_file=$wd/species_abundance.txt
-        mv species_abundance.txt $wd
+        python $script_dir/species_abundance_cal.py $genomes_info reads_classification.csv long -ft $isfilter_flag $wd
     fi
 fi 
 
 
 if [ $strain_level_flag == "True" ]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Strain abundance estimation..."
-    python $script_dir/strain_abundance_cal.py -a $species_abund_threshold -fr $unique_trio_nodes_fraction -fc $unique_trio_nodes_count -c $min_cov -d $min_depth -t $threads -gt $gurobi_threads -s $save $pantax_db $genomes_info reads_classification.csv gfa_mapped.json $pantax_db/species_range.txt $specie_abund_file 
+    python $script_dir/strain_abundance_cal.py -a $species_abund_threshold -fr $unique_trio_nodes_fraction -fc $unique_trio_nodes_count -c $min_cov -d $min_depth -t $threads -gt $gurobi_threads -s $save $pantax_db $genomes_info reads_classification.csv gfa_mapped.json $pantax_db/species_range.txt species_abundance.txt 
     if [ $save == 1 ]; then
         if [ $reconstruction_flag == "False" ]; then
             mv species_graph_info $pantax_db
@@ -508,18 +524,30 @@ if [ $strain_level_flag == "True" ]; then
             mv species_graph_info $new_pantax_db
         fi
     fi
-    if [ $pantax_output ]; then
-        mv strain_abundance.txt $wd/strain_abundance_$pantax_output.txt
-    else 
-        mv strain_abundance.txt $wd
-    fi
 fi
-
-if [ $read_aln ]; then
-    mv gfa_mapped.gaf $wd/$read_aln
-fi
-mv reads_classification.csv $pantax_report
 
 cd ..
+if [ $species_level_flag == "True" ]; then
+    mv $tmp_dir/species_abundance.txt $wd
+    if [ $pantax_output ]; then
+        specie_abund_file=${pantax_output}_species_abundance.txt
+        mv species_abundance.txt $specie_abund_file        
+    fi
+fi
+if [ $strain_level_flag == "True" ]; then
+    mv $tmp_dir/strain_abundance.txt $wd
+    if [ $pantax_output ]; then
+        strain_abund_file=${pantax_output}_strain_abundance.txt
+        mv strain_abundance.txt $strain_abund_file
+    fi
+fi
+if [ $read_aln ]; then
+    mv $tmp_dir/gfa_mapped.gaf $wd
+    mv gfa_mapped.gaf $read_aln
+fi
+
+mv $tmp_dir/reads_classification.csv $wd
+mv reads_classification.csv $pantax_report
+
 rm -rf tmp
 echo "$(date "+%Y-%m-%d %H:%M:%S") - PanTax Done."
