@@ -15,11 +15,11 @@ def main():
     parser.add_argument("read_cls_file", type=str, help="Read classification file")
     parser.add_argument("read_type", type=str, help="long/short")
     parser.add_argument("-ft", "--isfilter", dest="isfilter", type=int, default=1, help="MAPQ-based filter")
+    parser.add_argument("wd", type=str, default=None, help="Work directory")
     args = parser.parse_args()
-
+    global wd
+    wd = args.wd
     species_genomes_len = "species_genomes_stats.txt"
-    # if os.path.exists("/home/work/wenhai/metaprofiling/bacteria_refgenome_NCBIdata/alternative_methods_0208/evaluation_scripts/species_genomes_stats.txt"):
-    #     species_genomes_len = "/home/work/wenhai/metaprofiling/bacteria_refgenome_NCBIdata/alternative_methods_0208/evaluation_scripts/species_genomes_stats.txt"
     if not os.path.exists(f"{species_genomes_len}"):
         species_genomes_len_cal(f"{args.genomes_info}")
     genomes_stats = pd.read_csv(f"{species_genomes_len}", sep="\t", header=None, usecols=[0,1], dtype={0: str, 1: float, 2:float})
@@ -115,7 +115,6 @@ def short_abundance_cal(counts, genomes_stats, each_read_size):
         coverage = count*each_read_size/genome_len
         abundance_set[species_taxid] = coverage
     suml = sum(abundance_set.values())
-    print(suml)
     for key, value in abundance_set.items():
         abundance_set[key] = [value/suml, value]
     abundance_set = dict(sorted(abundance_set.items(), key=lambda x: x[1][0], reverse=True))
@@ -125,6 +124,7 @@ def species_genomes_len_cal(genomes_info_file):
     genomes_info = pd.read_csv(genomes_info_file, sep="\t", usecols=[2,4], dtype=object)       
     if not os.path.exists("genome_statics.txt"):
         genomes = genomes_info["id"].tolist()
+        genomes = [os.path.join(wd, genome) if not os.path.isabs(genome) and wd else genome for genome in genomes]
         with concurrent.futures.ProcessPoolExecutor() as executor:
             executor.map(statics_and_write, genomes)    
     genomes_info["genomes"] = genomes_info["id"].apply(os.path.basename)

@@ -8,11 +8,12 @@ usage = "Prepare genomes information for every species to build pangenome with p
 def main():
     parser = argparse.ArgumentParser(prog="python prepare_building.py", description=usage)
     parser.add_argument("genomes_info", type=str, help="Genomes information file.Format: genomeID\tstrain_taxid\tspecies_taxid\ttorganism_name\tid.")
+    parser.add_argument("wd", type=str, help="Work directory")
     args = parser.parse_args()
     if not os.path.exists("pggb_species"):
-        prepare_species_genomes(args.genomes_info)
+        prepare_species_genomes(args.genomes_info, args.wd)
 
-def prepare_species_genomes(genomes_info):
+def prepare_species_genomes(genomes_info, wd):
     genomes_info_df = pd.read_csv(genomes_info, sep="\t")
     species_ge2 = pd.DataFrame(genomes_info_df[genomes_info_df.duplicated("species_taxid", keep=False)])
     grouped = species_ge2.groupby("species_taxid")
@@ -20,6 +21,7 @@ def prepare_species_genomes(genomes_info):
         os.mkdir("pggb_species")
         for species_taxid, group_df in grouped:
             genomes = group_df["id"].tolist()
+            genomes = [os.path.join(wd, genome) if not os.path.isabs(genome) else genome for genome in genomes]  
             with open(f"pggb_species/{species_taxid}.txt", "w") as f:
                 f.write("\n".join(genomes) + "\n")
     species_eq1 = pd.DataFrame(genomes_info_df[~genomes_info_df.duplicated("species_taxid", keep=False)])

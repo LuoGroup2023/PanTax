@@ -128,7 +128,7 @@ def parallel_optimize_otu(otu, otu_range, pantax_db, aln_file, min_depth, reduce
     # node_abundances, unique_trio_node_abundances = get_node_abundances(list(nodes_len_npy), unique_trio_nodes, unique_trio_nodes_len, aln_file, start, end)
     node_abundances, unique_trio_node_abundances = get_node_abundances2(read_group_data[otu], list(nodes_len_npy), unique_trio_nodes, unique_trio_nodes_len, start)  
     non_zero_count = sum(1 for elem in list(node_abundances.values()) if elem != 0)
-    print(f"{otu} node abundance > 0 number:{non_zero_count}\n")
+    print(f"{otu} species node abundance > 0 number:{non_zero_count}\n")
     otu_paths = []
     haps_id = []
     for hap_id, path in paths.items():
@@ -468,7 +468,7 @@ def optimize(a, nvert, paths, reduce_obj, max_strains,
                 continue
             frequencies = np.array([trio_node_abundances[i] if i in selected_indices else 0 for i in range(len(trio_node_abundances))])
             count_greater_than_zero = np.sum(frequencies > 0)
-            print(f"{count_greater_than_zero}/{len(selected_indices)}")
+            # print(f"{count_greater_than_zero}/{len(selected_indices)}")
             if count_greater_than_zero/len(selected_indices) < unique_trio_nodes_fraction:
                 continue
             else:
@@ -479,12 +479,12 @@ def optimize(a, nvert, paths, reduce_obj, max_strains,
                 else:
                     frequencies_mean = 0
                 possible_strains_frequencies_mean.append(frequencies_mean)
-        print("#strains / #paths = {} / {}".format(len(possible_strains_idx), origin_paths_len))
+        # print("#strains / #paths = {} / {}".format(len(possible_strains_idx), origin_paths_len))
         paths = [paths[idx] for idx in possible_strains_idx]
     else:
         possible_strains_idx = [0]
     t_stop = time.perf_counter()
-    print("Elapsed time: {:.1f} seconds".format(t_stop-t1_start))
+    # print("Elapsed time: {:.1f} seconds".format(t_stop-t1_start))
 
     # absolute error
     obj_func = 1
@@ -631,10 +631,10 @@ def optimize(a, nvert, paths, reduce_obj, max_strains,
                 nstrains_test += int(v.x)
         print('\nObjective value: %g' % m.objVal)
         objVal = m.objVal
-        print(f"first sol:{x_sol}\n")
+        # print(f"first sol:{x_sol}\n")
         selected_strains = [1 if cov > min_cov_final else 0 for cov in x_sol]
         nstrains = sum(selected_strains)
-        print("#strains / #paths = {} / {}".format(nstrains, npaths))
+        print("#strains / #paths = {} / {}".format(nstrains, origin_paths_len))
 
         if origin_paths_len == 1:
             if x_sol[0] < min_cov_final:
@@ -646,11 +646,11 @@ def optimize(a, nvert, paths, reduce_obj, max_strains,
                 selected_strains[idx] = 0
                 continue
             f = abs(x_sol[idx]-frequencies_mean)/(x_sol[idx]+frequencies_mean)
-            print(f"idx:{idx}\tfrequencies_mean:{frequencies_mean}\txsol:{x_sol[idx]}\tf:{f}")
+            # print(f"idx:{idx}\tfrequencies_mean:{frequencies_mean}\txsol:{x_sol[idx]}\tf:{f}")
             if f > unique_trio_nodes_mean_count_fraction:
                 selected_strains[idx] = 0
         nstrains = sum(selected_strains)
-        print("#strains / #paths = {} / {}".format(nstrains, npaths))
+        # print("#strains / #paths = {} / {}".format(nstrains, npaths))
 
         # run phase 2 optimization:
         print("\n*** Phase 2 optimization***\n")
@@ -667,7 +667,7 @@ def optimize(a, nvert, paths, reduce_obj, max_strains,
                 x_final.append(v.x)
             elif obj_func >= 6 and 'strain_indicator' in v.varName:
                 nstrains_test += int(v.x)
-        print('\nObjective value: %g' % m.objVal)
+        print('Objective value: %g' % m.objVal)
         objVal = m.objVal
 
         selected_strains = [1 if cov > min_cov_final else 0 for cov in x_final]
