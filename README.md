@@ -39,7 +39,7 @@ GCF_000218545.1_ASM21854v1	593907	11	Cellulomonas gilvus ATCC 13127	/path/to/GCF
 GCF_025402875.1_ASM2540287v1	24.1	24	Shewanella putrefaciens	/path/to/GCF_025402875.1_ASM2540287v1_genomic.fna
 ```
 
-## Running and option
+## Running
 * create database only 
 ```
 sh pantax -f $genome_info --create
@@ -56,7 +56,7 @@ sh pantax -f $genome_info -l -r $fq -db $db --species-level --strain-level
 sh pantax -f $genome_info -s -p -r $fq -db $db --species-level --strain-level
 ```
 
-
+## options
 ```
 Usage: bash pantax -f genomes_info -s/-l -r read.fq [option]
        paired-end: bash pantax -f genomes_info -s -p -r read.fq --species-level
@@ -98,9 +98,11 @@ Strain-level taxonomic classification of metagenomic data using pangenome graphs
 
 ## PanTax output
 * alignment output
+
 You can specified `-S` option to get this file which is GAF format output from [vg](https://github.com/vgteam/vg.git) or [Graphaligner](https://github.com/maickrau/GraphAligner). It reports which position of the pangenome each read should be matched to. For GAF format details, please see the [GAF format](https://github.com/lh3/gfatools/blob/master/doc/rGFA.md).
 
 * classification output(default output: pantax_report.csv)
+
 You can specified `-R` option to get this file. The following example shows classification assignments for a read. The assignment output has 4 columns.
 ```
 read_id mapq    species_taxid   read_length
@@ -113,6 +115,7 @@ The fourth column is the length of the read.
 
 * abundance profiling
 1. species level
+
 The following example shows a classification summary at species level. 
 ```
 species_taxid	predicted_abundance	predicted_coverage
@@ -124,6 +127,7 @@ The third column is the average coverage of this species.
 ```
 
 2. strain level
+
 The following example shows a classification summary for each genome. 
 ```
 species_taxid	strain_taxid	genome_ID	predicted_coverage	predicted_abundance
