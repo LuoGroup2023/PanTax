@@ -354,7 +354,8 @@ if [ $create_db == "False" ]; then
 fi
 script_path=$(readlink -f $0)
 script_dir=$(dirname $script_path)
-tools_dir=$(dirname $script_dir)/tools
+# tools_dir=$(dirname $script_dir)/tools
+tools_dir=$script_dir/tools
 if [ $vg ]; then
     :
 else
