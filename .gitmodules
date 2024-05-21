@@ -1,0 +1,3 @@
+[submodule "tools/fastix"]
+	path = tools/fastix
+	url = https://github.com/ekg/fastix
