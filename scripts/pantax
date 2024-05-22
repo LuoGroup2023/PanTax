@@ -14,7 +14,7 @@ function print_help() {
   echo "        --create                          Create database only."
   echo "        --vg FILE                         Path to vg executable file."
   echo "        -v, --verbose                     Detailed database build log."
-  echo "        -t, --threads INT                 Number of processes to run in parallel (default: 64)."
+  echo "        -t, --threads INT                 Number of processes to run in parallel(default: 64)."
   echo "        --help, -h                        Print this help message."
   echo "        --version                         Print the version info."
   echo "    Database creation:"
@@ -37,7 +37,7 @@ function print_help() {
   echo "        --filter                          MAPQ-based filter."
   echo "        --min_cov int                     Minimum coverage required per strain(default: 0)."
   echo "        --min_depth int                   Graph nodes with sequence depth less than <min_depth>(default: 0)."
-  echo "        -gt int                           Gurobi threads."
+  echo "        -gt int                           Gurobi threads(default: 1)."
   echo "        -g, --save                        Save species graph information."
   echo "        -S, --classified-out FILENAME     File for alignment output(suffix)."
   echo "        -R, --report FILENAME             File for read classification output(suffix)."
@@ -71,7 +71,7 @@ min_cov=0
 min_depth=0
 
 wd=$(pwd)
-pantax_report=pantax_report.csv
+pantax_report=pantax_report.tsv
 
 #Print help if no argument specified
 if [[ "$1" == "" ]]; then
@@ -259,7 +259,7 @@ while [[ "$1" != "" ]]; do
         exit 1
         ;;
         *)
-        pantax_report="$2".csv
+        pantax_report="$2".tsv
         shift 2
         ;;
         esac

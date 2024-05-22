@@ -1,20 +1,26 @@
 # PanTax
 
+PanTax is a pangenome graph-based taxonomic classification tool designed to overcome the limitations of traditional single-reference genome approaches. It excels in providing accurate taxonomic classification at the strain level, handling both short and long reads, and supporting single or multiple species. By leveraging pangenome graphs, PanTax captures the genetic diversity across multiple related genomes, thereby eliminating the biases introduced by using a single linear representative genome. 
+
 ## Installation
 The dependencies of PaxTax can generally be installed through conda. There are two dependencies that require special attention. 
 
-Firstly, [pggb](https://github.com/pangenome/pggb.git) relies on vg 1.40, which conflicts with the vg version we used for read alignment. We recommend using a newer version of [vg](https://github.com/vgteam/vg.git), and PanTax testing relies on vg 1.52. We have provided the vg 1.52 executable file (default path) in the tools directory. If it is not available, we recommend using conda to create a new environment and installing vg. Then you can place it under the tools directory through a soft link or directly specify its path through `--vg` option.
+Firstly, [pggb](https://github.com/pangenome/pggb.git) depends on vg version 1.40, which is incompatible with the version of vg we use for read alignment. We recommend using a more recent version of [vg](https://github.com/vgteam/vg.git), specifically vg>=1.52. We have included the vg 1.52 executable file (default path) in the tools directory. If this is not available, we suggest creating a new environment with conda and installing vg. You can then place it in the tools directory via a symbolic link or specify its path directly using the `--vg` option.
 
-Secondly, PanTax relies on [Gurobi Optimizer](https://www.gurobi.com/solutions/gurobi-optimizer/) python package. Although its download has been provided in the environment.yaml file, it needs to apply for a license on the official website for normal use in large model optimization. 
+Secondly, PanTax relies on the [Gurobi Optimizer](https://www.gurobi.com/solutions/gurobi-optimizer/) Python package. While the package download is included in the environment.yaml file, a license must be obtained from the official website to use it for large model optimizations.
+
 
 ```
 git clone https://github.com/LuoGroup2023/PanTax.git
 cd PanTax
 conda env create -f environment.yaml
 sh install.sh
+conda activate Pantax
 
+# If vg is not available, install with conda.
 conda create -n vg python=3.10
 conda activate vg
+conda install vg=1.52 -c bioconda
 ln -fs /path/to/miniconda3/envs/vg/bin/vg PanTax/tools
 ```
 
@@ -25,11 +31,11 @@ We recommend removing plasmids and redundancy from the genome first with --remov
 If genomes are all in NCBI refseq database, you only need to use -r option to specify the directory containing these genomes.
 
 ```
-sh data_preprocessing.sh -r ref --remove --cluster
+/path/to/PanTax/scripts/data_preprocessing.sh -r ref --remove --cluster
 ```
 Otherwise, you need to provide a file containing information about the custom genomes.
 ```
-sh data_preprocessing.sh -c genomes_info.txt --remove --cluster
+/path/to/PanTax/scripts/data_preprocessing.sh -c genomes_info.txt --remove --cluster
 ```
 The `genomes_info.txt` file gives a list of reference genomes in fasta format, which constitute PaxTax's original database, alongwith NCBI's taxonomic information. The input lines in the file should contain at least 5 tab-delimited fields; from left to right, they are Genome IDs, Strain taxonomic IDs, Species taxonomic IDs, Organism names, Genome absolute path.
 Here is an example format of `genomes_info.txt` file:
@@ -40,26 +46,26 @@ GCF_025402875.1_ASM2540287v1	24.1	24	Shewanella putrefaciens	/path/to/GCF_025402
 ```
 
 ## Running
-* create database only 
+* **create database only** 
 ```
-sh pantax -f $genome_info --create
+/path/to/PanTax/scripts/pantax -f $genome_info --create
 ```
-You'll need to run `sh pantax -f $genome_info --create`. Then you will get reference_pangenome.gfa and some other files in your database directory. 
+You'll need to run /path/to/PanTax/scripts/pantax -f $genome_info --create. This will generate reference_pangenome.gfa and other files in your database directory.
 
-Due to the large size of the reference pangenome we constructed for testing, we provide the `genomes_info.txt` used here. You need to download these genomes in NCBI RefSeq and modify the actual path of the genome in the `genomes_info.txt`. But NCBI RefSeq will make regular adjustments to the database, and we do not guarantee that all of these genomes are in the database.
+Due to the large size of the reference pangenome we used for testing, we provide the `genomes_info.txt` used here. You need to download these genomes from NCBI RefSeq and update the actual paths in `genomes_info.txt`. Please note that NCBI RefSeq periodically updates their database, so we cannot guarantee that all the listed genomes will be available. Building the reference pangenome takes approximately one week with this `genomes_info.txt`. 
 
-* Query with specified database
+* **Query with specified database**
 ```
 # long read
-sh pantax -f $genome_info -l -r $fq -db $db --species-level --strain-level
+/path/to/PanTax/scripts/pantax -f $genome_info -l -r $fq -db $db --species-level --strain-level
 # short read(pair-end)
-sh pantax -f $genome_info -s -p -r $fq -db $db --species-level --strain-level
+/path/to/PanTax/scripts/pantax -f $genome_info -s -p -r $fq -db $db --species-level --strain-level
 ```
 
 ## options
 ```
-Usage: bash pantax -f genomes_info -s/-l -r read.fq [option]
-       paired-end: bash pantax -f genomes_info -s -p -r read.fq --species-level
+Usage: /path/to/PanTax/scripts/pantax -f genomes_info -s/-l -r read.fq [option]
+       paired-end: /path/to/PanTax/scripts/pantax -f genomes_info -s -p -r read.fq --species-level
 
 Strain-level taxonomic classification of metagenomic data using pangenome graphs
     General options:
@@ -89,7 +95,7 @@ Strain-level taxonomic classification of metagenomic data using pangenome graphs
         --filter                          MAPQ-based filter.
         --min_cov int                     Minimum coverage required per strain(default: 0).
         --min_depth int                   Graph nodes with sequence depth less than <min_depth>(default: 0).
-        -gt int                           Gurobi threads.
+        -gt int                           Gurobi threads(default: 1).
         -g, --save                        Save species graph information.
         -S, --classified-out FILENAME     File for alignment output(suffix).
         -R, --report FILENAME             File for read classification output(suffix).
@@ -97,13 +103,13 @@ Strain-level taxonomic classification of metagenomic data using pangenome graphs
 ```
 
 ## PanTax output
-* alignment output
+* **Alignment output**
 
-You can specified `-S` option to get this file which is GAF format output from [vg](https://github.com/vgteam/vg.git) or [Graphaligner](https://github.com/maickrau/GraphAligner). It reports which position of the pangenome each read should be matched to. For GAF format details, please see the [GAF format](https://github.com/lh3/gfatools/blob/master/doc/rGFA.md).
+You can specify the -S option to obtain this file, which is in GAF format, from [vg](https://github.com/vgteam/vg.git) or [Graphaligner](https://github.com/maickrau/GraphAligner). This file indicates the pangenome positions to which each read aligns. For details on the GAF format, please refer to the [GAF format](https://github.com/lh3/gfatools/blob/master/doc/rGFA.md).
 
-* classification output(default output: pantax_report.csv)
+* **Classification output**(default output: pantax_report.tsv)
 
-You can specified `-R` option to get this file. The following example shows classification assignments for a read. The assignment output has 4 columns.
+You can specify `-R` option to obtain this file. The following example shows classification assignments for a read. The assignment output has 4 columns.
 ```
 read_id mapq    species_taxid   read_length
 S0R1806	60	34	10654
@@ -113,7 +119,7 @@ The third column is the taxonomic ID of the read.
 The fourth column is the length of the read.
 ```
 
-* abundance profiling
+* **Abundance profiling**
 1. species level
 
 The following example shows a classification summary at species level. 
@@ -128,7 +134,7 @@ The third column is the average coverage of this species.
 
 2. strain level
 
-The following example shows a classification summary for each genome. 
+The following example shows a classification summary at strain level. 
 ```
 species_taxid	strain_taxid	genome_ID	predicted_coverage	predicted_abundance
 34	34.4	GCF_006401215.1_ASM640121v1	5.0	0.3945153945153945
@@ -145,10 +151,16 @@ The third column is the average coverage of this strain.
 * long read
 ```
 cd PanTax/example/sample_hifi_data
+# species level
+sh ../../scripts/pantax -f ../sample_genome_info.txt -l -r long_reads.fq.gz --species-level
+# strain level
 sh ../../scripts/pantax -f ../sample_genome_info.txt -l -r long_reads.fq.gz --species-level --strain-level
 ```
 * short read
 ```
 cd PanTax/example/sample_ngs_data
+# species level
+sh ../../scripts/pantax -f ../sample_genome_info.txt -s -p -r short_reads.fq.gz --species-level
+# strain level
 sh ../../scripts/pantax -f ../sample_genome_info.txt -s -p -r short_reads.fq.gz --species-level --strain-level
 ```
