@@ -26,9 +26,9 @@ ln -fs /path/to/miniconda3/envs/vg/bin/vg PanTax/tools
 
 ## Genome preprocessing
 
-We recommend removing plasmids and redundancy from the genome first with --remove option and --cluster option, respectively. Eventually you will get a file containing genomic information in /path/to/database/library.
+We recommend removing plasmids and redundancy from the genome first with `--remove` option and `--cluster` option, respectively. Eventually you will get a file containing genomic information in /path/to/database/library.
 
-If genomes are all in NCBI refseq database, you only need to use -r option to specify the directory containing these genomes.
+If genomes are all in NCBI refseq database, you only need to use `-r` option to specify the directory containing these genomes.
 
 ```
 /path/to/PanTax/scripts/data_preprocessing.sh -r ref --remove --cluster
@@ -46,7 +46,7 @@ GCF_025402875.1_ASM2540287v1	24.1	24	Shewanella putrefaciens	/path/to/GCF_025402
 ```
 
 ## Running
-* **create database only** 
+* **Create database only** 
 ```
 /path/to/PanTax/scripts/pantax -f $genome_info --create
 ```
@@ -105,7 +105,7 @@ Strain-level taxonomic classification of metagenomic data using pangenome graphs
 ## PanTax output
 * **Alignment output**
 
-You can specify the -S option to obtain this file, which is in GAF format, from [vg](https://github.com/vgteam/vg.git) or [Graphaligner](https://github.com/maickrau/GraphAligner). This file indicates the pangenome positions to which each read aligns. For details on the GAF format, please refer to the [GAF format](https://github.com/lh3/gfatools/blob/master/doc/rGFA.md).
+You can specify the `-S` option to obtain this file, which is in GAF format, from [vg](https://github.com/vgteam/vg.git) or [Graphaligner](https://github.com/maickrau/GraphAligner). This file indicates the pangenome positions to which each read aligns. For details on the GAF format, please refer to the [GAF format](https://github.com/lh3/gfatools/blob/master/doc/rGFA.md).
 
 * **Classification output**(default output: pantax_report.tsv)
 
