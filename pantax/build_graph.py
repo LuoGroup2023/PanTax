@@ -1,7 +1,8 @@
-
+#!/usr/bin/env python3
 # for every species only has one strain, merge all strains to a big gfa file and node length chopped by ourselves.
-import os
+import os, sys
 import argparse
+sys.path.append(os.path.split(os.path.abspath(__file__))[0])
 from staticsData import read_data
 import concurrent.futures
 

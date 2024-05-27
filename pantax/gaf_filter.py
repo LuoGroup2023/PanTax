@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+import argparse, sys, json, os
 from collections import defaultdict
+sys.path.append(os.path.split(os.path.abspath(__file__))[0])
 from read_classification import ReadClassification
-import argparse, sys, json
 
 def filter_max_alignment(gaf_file):
     readid_to_max_alignment_10 = defaultdict(float)

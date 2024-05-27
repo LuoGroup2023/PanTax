@@ -1,7 +1,8 @@
-
+#!/usr/bin/env python3
 import sys, os, argparse, fcntl
 # from prettytable import PrettyTable
 import concurrent.futures
+sys.path.append(os.path.split(os.path.abspath(__file__))[0])
 from toolkits import Logger
 
 usage = "Stat basic information of nucleic acid sequence file in fasta format."

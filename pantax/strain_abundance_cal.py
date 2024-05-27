@@ -1,4 +1,4 @@
-
+#!/usr/bin/env python3
 import sys, json, os, re, argparse, time, math, h5py
 import numpy as np
 import pandas as pd
@@ -6,6 +6,7 @@ from gurobipy import *
 from graph_tool.all import Graph
 from tqdm import tqdm # progress tracker
 from functools import partial
+sys.path.append(os.path.split(os.path.abspath(__file__))[0])
 from aln_json_process import read_group
 import concurrent.futures 
 os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"

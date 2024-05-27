@@ -81,6 +81,14 @@ fi
 while [[ "$1" != "" ]]; do
     case "$1" in
     "--help" | "-h")
+        script_path=$(readlink -f $0)
+        script_dir=$(dirname $script_path)
+        # tools_dir=$(dirname $script_dir)/tools
+        tools_dir=$script_dir/tools
+        vg help
+        $tools_dir/vg help
+        $tools_dir/fastix -h
+        strain_abundance_cal.py -h
         print_help
         ;;
     "--version")
@@ -406,7 +414,7 @@ if [ $reconstruction_flag == "True" ]; then
                 while IFS= read genome; do
                     sample_genome=$(basename $genome | cut -f 1,2 -d '_')
                     # echo $genome
-                    $tools_dir/fastix/bin/fastix $genome -p "${sample_genome}#1#" | bgzip -@ $threads -c > ${species_dir}/${sample_genome}.fa.gz
+                    $tools_dir/fastix $genome -p "${sample_genome}#1#" | bgzip -@ $threads -c > ${species_dir}/${sample_genome}.fa.gz
                 done < $f
                 genomes_list=$(find $species_dir -name "*.fa.gz" -exec echo -n "{} " \;)
                 num=$(ls $species_dir/*.fa.gz | wc -l)

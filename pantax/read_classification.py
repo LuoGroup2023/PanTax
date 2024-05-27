@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # process read classfication file with multiple processes and threads, but it need gaf(it only use in the script, so it need some time to produce)
 # And it use pandas to read whole file once, so it need too many memory.
 # 2G data need 10 min, may be less. Some step can be optimized.

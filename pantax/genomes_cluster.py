@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sys, os, subprocess, argparse
 import concurrent.futures
 import numpy as np
@@ -5,6 +6,7 @@ import pandas as pd
 from functools import partial
 import networkx as nx
 from itertools import combinations
+sys.path.append(os.path.split(os.path.abspath(__file__))[0])
 from toolkits import Logger
 
 usage = "Filter genomes and cluster at the strain and species levels"

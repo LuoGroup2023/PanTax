@@ -1,8 +1,9 @@
-
+#!/usr/bin/env python3
 import argparse
 import os
 import sys
 import pandas as pd
+sys.path.append(os.path.split(os.path.abspath(__file__))[0])
 from staticsData import statics_and_write
 import concurrent.futures
 import subprocess
