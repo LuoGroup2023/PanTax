@@ -56,7 +56,7 @@ GCF_025402875.1_ASM2540287v1	24.1	24	Shewanella putrefaciens	/path/to/GCF_025402
 ```
 /path/to/PanTax/scripts/pantax -f $genome_info --create
 ```
-You'll need to run /path/to/PanTax/scripts/pantax -f $genome_info --create. This will generate reference_pangenome.gfa and other files in your database directory.
+You'll need to run `/path/to/PanTax/scripts/pantax -f $genome_info --create`. This will generate reference_pangenome.gfa and other files in your database directory.
 
 Due to the large size of the reference pangenome we used for testing, we provide the `genomes_info.txt` used here. You need to download these genomes from NCBI RefSeq and update the actual paths in `genomes_info.txt`. Please note that NCBI RefSeq periodically updates their database, so we cannot guarantee that all the listed genomes will be available. Building the reference pangenome takes approximately one week with this `genomes_info.txt`. 
 
