@@ -1,4 +1,4 @@
-
+#!/usr/bin/env python3
 import sys, json, os, re, argparse, time, math, h5py
 import numpy as np
 import pandas as pd

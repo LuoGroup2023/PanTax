@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sys, os, subprocess, argparse
 import concurrent.futures
 import numpy as np

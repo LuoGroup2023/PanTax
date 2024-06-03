@@ -1,4 +1,4 @@
-
+#!/usr/bin/env python3
 import sys, os, argparse, fcntl
 # from prettytable import PrettyTable
 import concurrent.futures
