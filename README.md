@@ -5,11 +5,17 @@ PanTax is a pangenome graph-based taxonomic classification tool designed to over
 ## Installation
 The dependencies of PaxTax can generally be installed through conda. There are two dependencies that require special attention. 
 
-Firstly, [pggb](https://github.com/pangenome/pggb.git) depends on vg version 1.40, which is incompatible with the version of vg we use for read alignment. We recommend using a more recent version of [vg](https://github.com/vgteam/vg.git), specifically vg>=1.52. We have included the vg 1.52 executable file (default path) in the tools directory. If this is not available, we suggest creating a new environment with conda and installing vg. You can then place it in the tools directory via a symbolic link or specify its path directly using the `--vg` option.
+Firstly, PanTax relies on the [Gurobi Optimizer](https://www.gurobi.com/solutions/gurobi-optimizer/) Python package. While the package download is included in the environment.yaml file, a license must be obtained from the official website to use it for large model optimizations.
 
-Secondly, PanTax relies on the [Gurobi Optimizer](https://www.gurobi.com/solutions/gurobi-optimizer/) Python package. While the package download is included in the environment.yaml file, a license must be obtained from the official website to use it for large model optimizations.
+Secondly, [pggb](https://github.com/pangenome/pggb.git) depends on vg version 1.40, which is incompatible with the version of vg we use for read alignment. We recommend using a more recent version of [vg](https://github.com/vgteam/vg.git), specifically vg>=1.52. We have included the vg 1.52 executable file (default path) in the tools directory. If this is not available, we suggest creating a new environment with conda and installing vg. You can then place it in the tools directory via a symbolic link or specify its path directly using the `--vg` option.
 
+* **From conda**
 
+```
+conda install yichenli899::pantax
+```
+
+* **From source**
 ```
 git clone https://github.com/LuoGroup2023/PanTax.git
 cd PanTax
@@ -17,7 +23,7 @@ conda env create -f environment.yaml
 sh install.sh
 conda activate Pantax
 
-# If vg is not available, install with conda.
+# If vg is not available, install with conda.(optional)
 conda create -n vg python=3.10
 conda activate vg
 conda install vg=1.52 -c bioconda
@@ -97,9 +103,9 @@ Strain-level taxonomic classification of metagenomic data using pangenome graphs
         --min_depth int                   Graph nodes with sequence depth less than <min_depth>(default: 0).
         -gt int                           Gurobi threads(default: 1).
         -g, --save                        Save species graph information.
-        -S, --classified-out FILENAME     File for alignment output(suffix).
-        -R, --report FILENAME             File for read classification output(suffix).
-        -o, --ouput FILENAME              File for abundance output(suffix).
+        -S, --classified-out FILENAME     File for alignment output(prefix).
+        -R, --report FILENAME             File for read classification output(prefix).
+        -o, --ouput FILENAME              File for abundance output(prefix).
 ```
 
 ## PanTax output
