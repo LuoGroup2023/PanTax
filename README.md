@@ -31,11 +31,11 @@ We recommend removing plasmids and redundancy from the genome first with `--remo
 If genomes are all in NCBI refseq database, you only need to use `-r` option to specify the directory containing these genomes.
 
 ```
-/path/to/PanTax/scripts/data_preprocessing.sh -r ref --remove --cluster
+/path/to/PanTax/scripts/data_preprocessing -r ref --remove --cluster
 ```
 Otherwise, you need to provide a file containing information about the custom genomes.
 ```
-/path/to/PanTax/scripts/data_preprocessing.sh -c genomes_info.txt --remove --cluster
+/path/to/PanTax/scripts/data_preprocessing -c genomes_info.txt --remove --cluster
 ```
 The `genomes_info.txt` file gives a list of reference genomes in fasta format, which constitute PaxTax's original database, alongwith NCBI's taxonomic information. The input lines in the file should contain at least 5 tab-delimited fields; from left to right, they are Genome IDs, Strain taxonomic IDs, Species taxonomic IDs, Organism names, Genome absolute path.
 Here is an example format of `genomes_info.txt` file:

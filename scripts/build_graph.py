@@ -1,4 +1,4 @@
-
+#!/usr/bin/env python3
 # for every species only has one strain, merge all strains to a big gfa file and node length chopped by ourselves.
 import os
 import argparse
