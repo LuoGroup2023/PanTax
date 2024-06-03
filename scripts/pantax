@@ -39,9 +39,9 @@ function print_help() {
   echo "        --min_depth int                   Graph nodes with sequence depth less than <min_depth>(default: 0)."
   echo "        -gt int                           Gurobi threads(default: 1)."
   echo "        -g, --save                        Save species graph information."
-  echo "        -S, --classified-out FILENAME     File for alignment output(suffix)."
-  echo "        -R, --report FILENAME             File for read classification output(suffix)."
-  echo "        -o, --ouput FILENAME              File for abundance output(suffix)."
+  echo "        -S, --classified-out FILENAME     File for alignment output(prefix)."
+  echo "        -R, --report FILENAME             File for read classification output(prefix)."
+  echo "        -o, --ouput FILENAME              File for abundance output(prefix)."
   echo ""
   exit 0
 }
