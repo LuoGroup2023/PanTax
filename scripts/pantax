@@ -452,7 +452,7 @@ if [ $short_reads == "True" ] || [ $long_read_fast_alignment == "True" ]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Reads alignment with vg giraffe."    
     # this step produce three index files: reference_pangenome.giraffe.gbz, reference_pangenome.dist, reference_pangenome.min.
     # default mode(quick)
-    if [ $reconstruction_flag == "True" ]; then
+    if [ $reconstruction_flag == "True" ] || [ ! -e $pantax_db/reference_pangenome.min ]; then
         echo "$(date "+%Y-%m-%d %H:%M:%S") - Construct index...."
         if [ $short_read_best_alignment == "False" ] && [ ! -e $pantax_db/reference_pangenome.min ]; then
             # # these commands all can show progress with option -p
