@@ -433,7 +433,7 @@ if [ $reconstruction_flag == "True" ]; then
     $vg combine -p $vg_files > reference_pangenome.vg
     $vg convert -f reference_pangenome.vg > reference_pangenome.gfa
     rm reference_pangenome.vg
-    python $script_dir/otu_range.py reference_pangenome.gfa $genomes_info --species-level 1 --strain-level 0
+    python $script_dir/otu_range.py reference_pangenome.gfa $genomes_info --species-level
     # extract gfa files for strain abundance computing
     mkdir -p species_gfa
     find gfa_build -name "*gfa" -exec bash -c 'input={}; name=$(basename $input); output=${name%%_merge*}.gfa; mv $input species_gfa/$output' \;
