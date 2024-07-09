@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-import sys
-import os
-import argparse
+import sys, os, argparse
 import pandas as pd
 
 usage = "Prepare genomes information for every species to build pangenome with pggb"
@@ -14,7 +12,7 @@ def main():
     if not os.path.exists("pggb_species"):
         prepare_species_genomes(args.genomes_info, args.wd)
 
-def prepare_species_genomes(genomes_info, wd):
+def prepare_species_genomes(genomes_info: str, wd: str) -> None:
     genomes_info_df = pd.read_csv(genomes_info, sep="\t")
     species_ge2 = pd.DataFrame(genomes_info_df[genomes_info_df.duplicated("species_taxid", keep=False)])
     grouped = species_ge2.groupby("species_taxid")

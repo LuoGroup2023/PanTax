@@ -2,10 +2,10 @@
 # process read classfication file with multiple processes and threads, but it need gaf(it only use in the script, so it need some time to produce)
 # And it use pandas to read whole file once, so it need too many memory.
 # 2G data need 10 min, may be less. Some step can be optimized.
-import argparse
+import argparse, re
 import numpy as np
 import pandas as pd
-import re
+from typing import List
 import concurrent.futures
 
 class ReadClassification:
@@ -13,19 +13,28 @@ class ReadClassification:
         self.species_range_file, self.mapped_gaf_file = args
         self.pair_range = None
     
-    def read_species_range_file(self):
+    def read_species_range_file(self) -> List[str]:
+        """
+        Obtain species and its range information.
+        """
         species_range = pd.read_csv(self.species_range_file, sep="\t", header=None, dtype={0: str, 1: int, 2:int})
         species = species_range.iloc[:, 0].tolist()
         self.pair_range = list(zip(species_range.iloc[:, 1], species_range.iloc[:, 2]))
         return species
 
     def read_mapped_gaf_file(self):
+        """
+        Read GAF file with pandas. One read per line.
+        """
         mapped_gaf = pd.read_csv(self.mapped_gaf_file, sep="\t", header=None, usecols=[0, 1, 5, 11])
         # reads = list(zip(mapped_gaf.iloc[:, 0], mapped_gaf.iloc[:, 1]))
         reads = [tuple(row) for row in mapped_gaf.values]
         return reads
 
     def sigle_read_classification(self, read):
+        """
+        Process single read.
+        """
         read_name = read[0]
         read_nodes = np.array([int(match.group()) for match in re.finditer(r'\d+', read[2])])
         mapq = read[3]
@@ -71,8 +80,6 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--species_range_file", dest="species_range_file", type=str, help="Species range file")
     parser.add_argument("-m", "--mapped_gaf_file", dest="mapped_gaf_file", type=str, help="Mapped gfa file")
     args = parser.parse_args()
-    if not args.species_range_file:
-        args.species_range_file = "/home/work/wenhai/metaprofiling/bacteria_refgenome_NCBIdata/short_read_species/merge_graph2/species_range.txt"
     if not args.mapped_gaf_file:
         args.mapped_gaf_file = "gfa_mapped.gaf"
     read_cls = ReadClassification(args.species_range_file, args.mapped_gaf_file)
