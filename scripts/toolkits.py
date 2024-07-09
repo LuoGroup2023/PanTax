@@ -1,5 +1,17 @@
 import logging
 from logging import handlers
+from time import time
+
+def timeit(func):
+    def func_wrapper(*args, **kwargs):
+        start = time()
+        ret = func(*args, **kwargs)
+        end = time()
+        spend = end - start
+        print("{} cost time: {:.3f} s".format(func.__name__, spend))
+        return ret
+
+    return func_wrapper
 
 class Logger(object):
     level_relations = {

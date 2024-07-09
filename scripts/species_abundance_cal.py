@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-import argparse
-import os
-import sys
+import argparse, os, sys, subprocess
 import pandas as pd
+from typing import Dict
 from staticsData import statics_and_write
 import concurrent.futures
-import subprocess
 
 usage = "Compute species abundance"
 
@@ -25,23 +23,25 @@ def main():
     genomes_stats = pd.read_csv(f"{species_genomes_len}", sep="\t", header=None, usecols=[0,1], dtype={0: str, 1: float, 2:float})
     genomes_stats.columns = ["species_taxid", "avg_len"]
     if args.read_type == "short":
+        # short read
         if args.isfilter:
             counts, read_len = short_filter_read_reads_cls(args.read_cls_file)
         else:
             counts, read_len = short_read_reads_cls(args.read_cls_file)
         abundance_set = short_abundance_cal(counts, genomes_stats, read_len)
     elif args.read_type == "long":
+        # long read
         abundance_set = long_read_reads_cls(args.read_cls_file, genomes_stats, args.isfilter)
     write(abundance_set)
 
-def short_read_reads_cls(cls_file_path, sep="\t", header=None, usecol=2):
+def short_read_reads_cls(cls_file_path: str, sep: str="\t", header=None, usecol=2):
     reads_cls_data = pd.read_csv(cls_file_path, sep=sep, header=header, usecols=[usecol],dtype=object)
     reads_cls_data.iloc[:,0] = reads_cls_data.iloc[:,0].fillna("0")
     counts = reads_cls_data.iloc[:,0].value_counts().sort_values(ascending=False)
-    read_len = pd.read_csv(cls_file_path, header=None, sep="\t", nrows=1).iloc[0,3]
+    read_len = pd.read_csv(cls_file_path, header=None, sep="\t", nrows=1).iloc[0,1]
     return counts, read_len
 
-def short_filter_read_reads_cls(cls_file_path):
+def short_filter_read_reads_cls(cls_file_path: str):
     reads_cls_data = pd.read_csv(cls_file_path, sep="\t", header=None, usecols=[1, 2],dtype={0:str, 1:int, 2:str, 3:int})
     reads_cls_data.columns = ["mapq", "species"]
     reads_cls_data = reads_cls_data.dropna(subset=["species"])
@@ -59,16 +59,16 @@ def short_filter_read_reads_cls(cls_file_path):
             index.append(group_name)
             value_counts.append(read_count)
     counts = pd.Series(value_counts, index=index)
-    read_len = pd.read_csv(cls_file_path, header=None, sep="\t", nrows=1).iloc[0,3]
+    read_len = pd.read_csv(cls_file_path, header=None, sep="\t", nrows=1).iloc[0,1]
     return counts, read_len
 
-def long_read_reads_cls(cls_file_path, genomes_stats, isfilter):
+def long_read_reads_cls(cls_file_path: str, genomes_stats: pd.DataFrame, isfilter: int):
     reads_cls_data = pd.read_csv(cls_file_path, sep="\t", header=None, dtype={0:str, 1:int, 2:str, 3:int})
     reads_cls_data.columns = ["readID", "mapq", "species", "read_len"]
-    reads_cls_data = reads_cls_data.drop_duplicates(subset='readID', keep='first')
+    reads_cls_data = reads_cls_data.drop_duplicates(subset="readID", keep="first")
     reads_cls_data = reads_cls_data.dropna(subset=["species"])
     grouped = reads_cls_data.groupby("species")
-    counts = {}
+    counts: Dict[str, int] = {} # key = species_taxid, value = base count
     for group_name, group_data in grouped:
         if isfilter:
             read_count = len(group_data)
@@ -94,14 +94,14 @@ def long_read_reads_cls(cls_file_path, genomes_stats, isfilter):
     abundance_set = dict(sorted(abundance_set.items(), key=lambda x: x[1][0], reverse=True))
     return abundance_set
 
-def statics_species_genome_len(species_taxid, genomes_stats):
+def statics_species_genome_len(species_taxid: str, genomes_stats: pd.DataFrame) -> int:
     genome_len = None
     find_genome = genomes_stats.loc[genomes_stats["species_taxid"] == species_taxid]
     if not find_genome.empty:
         genome_len = find_genome["avg_len"].values[0]   
     return genome_len
 
-def short_abundance_cal(counts, genomes_stats, each_read_size):
+def short_abundance_cal(counts: pd.Series, genomes_stats: pd.DataFrame, each_read_size: int):
     abundance_set = {}
     for i in range(len(counts)):
         species_taxid = counts.index[i]
@@ -120,7 +120,7 @@ def short_abundance_cal(counts, genomes_stats, each_read_size):
     abundance_set = dict(sorted(abundance_set.items(), key=lambda x: x[1][0], reverse=True))
     return abundance_set
 
-def species_genomes_len_cal(genomes_info_file):
+def species_genomes_len_cal(genomes_info_file: str):
     genomes_info = pd.read_csv(genomes_info_file, sep="\t", usecols=[2,4], dtype=object)       
     if not os.path.exists("genome_statics.txt"):
         genomes = genomes_info["id"].tolist()

@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 # for every species only has one strain, merge all strains to a big gfa file and node length chopped by ourselves.
-import os
-import argparse
+import os, argparse
+from typing import Dict, List
 from staticsData import read_data
 import concurrent.futures
 
 usage = "Build variation graph for the species only one genomes"
 
 class BuildGraph:
-    def __init__(self, species_eq1_genomes_info):
+    def __init__(self, species_eq1_genomes_info: str):
         self.species_eq1_genomes_info = species_eq1_genomes_info
 
-    def read_fasta(self, genome_path):
+    def read_fasta(self, genome_path: str) -> Dict[str, str]:
+        """
+        Read a genome file(.fa, .fna, .fasta).
+        """
         genome = read_data(genome_path)
         genome_seqids = list(genome.keys())
         genome_name = os.path.basename(genome_path).split("_")[0] + "_" + os.path.basename(genome_path).split("_")[1]
-        new_genome_seqs = {}
+        new_genome_seqs: Dict[str, str] = {} # [key] = seqid(i.e. NZ...), [value] = seq(fast object)
         for genome_seqid in genome_seqids:
             new_genome_seqid = genome_seqid.split(" ")[0]
             new_genome_seqid = f"{genome_name}#1#{new_genome_seqid}"
@@ -23,7 +26,11 @@ class BuildGraph:
         return new_genome_seqs
 
 
-    def single_genome_gfa(self, species_taxid, genome_id, chopped=1024):
+    def single_genome_gfa(self, species_taxid: str, genome_id: str, chopped: int = 1024) -> None:
+        """
+        Cut the genome into blocks of specified length, which serve as nodes. This GFA graph is like a chain.
+        Node 1 -> node2 -> ... -> node n
+        """
         wd = "gfa_build"
         if not os.path.exists(f"{wd}/{species_taxid}.gfa"):        
             # genome_path = "/home/work/wenhai/metaprofiling/bacteria_refgenome_NCBIdata/complete_genome/complete_genome_without_plasmid/GCF_000009485.1_ASM948v1_genomic.fna"
@@ -32,9 +39,9 @@ class BuildGraph:
             # chopped = 2
             genome_seqs = self.read_fasta(genome_id)
             flag = 0
-            S = []
-            L = []
-            W = []
+            S: List[str] = []
+            L: List[str] = []
+            W: List[str] = []
             for genome_seqid, genome_seq in genome_seqs.items():
                 split_genome_seq = [genome_seq[i:i+chopped] for i in range(0, len(genome_seq), chopped)]
                 s_validate_genome_len = 0
@@ -61,9 +68,9 @@ class BuildGraph:
                 f.write("".join(L))
                 f.write("".join(W))
 
-    def parallel_build_gfa(self):
+    def parallel_build_gfa(self) -> None:
         with open(self.species_eq1_genomes_info, "r") as f:
-            species_to_genome = {}
+            species_to_genome: Dict[str, str] = {} # [key] = species_taxid, [value] = genomeID(i.e. GCF...)
             for line in f:
                 tokens = line.strip().split("\t")
                 species_taxid = tokens[0]

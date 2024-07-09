@@ -369,9 +369,9 @@ if [ ! -d $pantax_db ]; then
 fi
 pantax_db=$(readlink -f $pantax_db)
 # cd $pantax_db
-if [ -d tmp ]; then
-    rm -rf tmp
-fi
+# if [ -d tmp ]; then
+#     rm -rf tmp
+# fi
 mkdir -p tmp
 tmp_dir=$(readlink -f tmp)
 cd $tmp_dir
@@ -400,7 +400,9 @@ if [ $reconstruction_flag == "True" ]; then
                 species_dir=$(basename $f)
                 species_dir=${species_dir%.txt}
                 if [ ! -d $species_dir ]; then
-                    mkdir -p $species_dir
+                    mkdir $species_dir
+                else
+                    continue
                 fi
                 while IFS= read genome; do
                     sample_genome=$(basename $genome | cut -f 1,2 -d '_')
@@ -452,7 +454,7 @@ if [ $short_reads == "True" ] || [ $long_read_fast_alignment == "True" ]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Reads alignment with vg giraffe."    
     # this step produce three index files: reference_pangenome.giraffe.gbz, reference_pangenome.dist, reference_pangenome.min.
     # default mode(quick)
-    if [ $reconstruction_flag == "True" ]; then
+    if [ $reconstruction_flag == "True" ] || [ ! -e $pantax_db/reference_pangenome.min ]; then
         echo "$(date "+%Y-%m-%d %H:%M:%S") - Construct index...."
         if [ $short_read_best_alignment == "False" ] && [ ! -e $pantax_db/reference_pangenome.min ]; then
             # # these commands all can show progress with option -p
@@ -472,28 +474,13 @@ if [ $short_reads == "True" ] || [ $long_read_fast_alignment == "True" ]; then
     elif [ $pair_short_read == "False" ]; then
         $vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -f $input_fq -t $threads --named-coordinates -o gaf > gfa_mapped.gaf
     fi
-    if [ $strain_level_flag == "True" ]; then
-        $vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -i -f $input_fq -t $threads --named-coordinates -o json > gfa_mapped.json
-    fi
 fi
 
 if [ $long_reads == "True" ] && [ $long_read_fast_alignment == "False" ]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Reads alignment with Graphaligner..."
-    if [ $strain_level_flag == "True" ]; then
-        GraphAligner -g $pantax_db/reference_pangenome.gfa -f $input_fq -a gfa_mapped.gaf -a gfa_mapped.json -x vg -t $threads
-        python $script_dir/gaf_filter.py -i gfa_mapped.gaf
-        python $script_dir/gaf_filter.py -i gfa_mapped_filtered.gaf -j gfa_mapped.json -s $pantax_db/species_range.txt
-        # python $script_dir/gaf_filter2.py -i gfa_mapped.gaf
-        # awk 'NR==FNR{lines[$1]; next} FNR in lines' gfa_mapped_filtered_line_numbers.txt gfa_mapped.json > gfa_mapped_filtered.json
-        # cp gfa_mapped.gaf gfa_mapped_old.gaf
-        # cp gfa_mapped.json gfa_mapped_old.json
-        mv gfa_mapped_filtered.gaf gfa_mapped.gaf
-        mv gfa_mapped_filtered.json gfa_mapped.json
-    else
-        GraphAligner -g $pantax_db/reference_pangenome.gfa -f $input_fq -a gfa_mapped.gaf -x vg -t $threads
-        python $script_dir/gaf_filter.py -i gfa_mapped.gaf
-        mv gfa_mapped_filtered.gaf gfa_mapped.gaf
-    fi
+    GraphAligner -g $pantax_db/reference_pangenome.gfa -f $input_fq -a gfa_mapped.gaf -x vg -t $threads
+    python $script_dir/gaf_filter.py -i gfa_mapped.gaf
+    mv gfa_mapped_filtered.gaf gfa_mapped.gaf
 fi
 
 if [ -f "gfa_mapped.gaf" ] && [ -f $pantax_db/species_range.txt ]; then
@@ -516,7 +503,7 @@ fi
 
 if [ $strain_level_flag == "True" ]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Strain abundance estimation..."
-    python $script_dir/strain_abundance_cal.py -a $species_abund_threshold -fr $unique_trio_nodes_fraction -fc $unique_trio_nodes_count -c $min_cov -d $min_depth -t $threads -gt $gurobi_threads -s $save $pantax_db $genomes_info reads_classification.csv gfa_mapped.json $pantax_db/species_range.txt species_abundance.txt 
+    python $script_dir/strain_abundance_cal.py -a $species_abund_threshold -fr $unique_trio_nodes_fraction -fc $unique_trio_nodes_count -c $min_cov -d $min_depth -t $threads -gt $gurobi_threads -s $save $pantax_db $genomes_info reads_classification.csv gfa_mapped.gaf $pantax_db/species_range.txt species_abundance.txt 
     if [ $save == 1 ]; then
         if [ $reconstruction_flag == "False" ]; then
             mv species_graph_info $pantax_db
@@ -549,5 +536,5 @@ fi
 mv $tmp_dir/reads_classification.csv $wd
 mv reads_classification.csv $pantax_report
 
-rm -rf tmp
+# rm -rf tmp
 echo "$(date "+%Y-%m-%d %H:%M:%S") - PanTax Done."
