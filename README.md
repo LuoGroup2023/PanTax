@@ -12,7 +12,7 @@ Secondly, [pggb](https://github.com/pangenome/pggb.git) depends on vg version 1.
 * **From conda**
 
 ```
-conda install yichenli899::pantax
+conda install yichenli899::pantax -c conda-forge -c bioconda -c gurobi 
 ```
 
 * **From source**
@@ -156,17 +156,17 @@ The third column is the average coverage of this strain.
 
 * long read
 ```
-cd PanTax/example/sample_hifi_data
+cd PanTax/example/hifi
 # species level
-sh ../../scripts/pantax -f ../sample_genome_info.txt -l -r long_reads.fq.gz --species-level
+sh ../../scripts/pantax -f ../example_genomes_info.txt -l -r long_reads.fq.gz --species-level
 # strain level
-sh ../../scripts/pantax -f ../sample_genome_info.txt -l -r long_reads.fq.gz --species-level --strain-level
+sh ../../scripts/pantax -f ../example_genomes_info.txt -l -r long_reads.fq.gz --species-level --strain-level
 ```
 * short read
 ```
-cd PanTax/example/sample_ngs_data
+cd PanTax/example/ngs
 # species level
-sh ../../scripts/pantax -f ../sample_genome_info.txt -s -p -r short_reads.fq.gz --species-level
+sh ../../scripts/pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --species-level
 # strain level
-sh ../../scripts/pantax -f ../sample_genome_info.txt -s -p -r short_reads.fq.gz --species-level --strain-level
+sh ../../scripts/pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --species-level --strain-level
 ```
