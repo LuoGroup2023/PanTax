@@ -298,10 +298,16 @@ def trio_nodes_info(paths, nodes_len_npy):
     for trio_node, values in trio_nodes_dict.items():
         hap2unique_trio_nodes_v.append(values[0])
         unique_trio_nodes_idx.append(values[2])
-    hap2unique_trio_nodes_m = np.stack(hap2unique_trio_nodes_v)
-    # trio nodes length
-    unique_trio_nodes_len = [sum(nodes_len_npy[idx] for idx in trio_nodes[i]) for i in unique_trio_nodes_idx]
-    unique_trio_nodes = {trio_nodes[i]: idx for idx, i in enumerate(unique_trio_nodes_idx)}
+    try:
+        hap2unique_trio_nodes_m = np.stack(hap2unique_trio_nodes_v)
+        # trio nodes length
+        unique_trio_nodes_len = [sum(nodes_len_npy[idx] for idx in trio_nodes[i]) for i in unique_trio_nodes_idx]
+        unique_trio_nodes = {trio_nodes[i]: idx for idx, i in enumerate(unique_trio_nodes_idx)}
+    except:
+        print(f"Warnings: {paths} have the same path or the total number of nodes per path is less than 3.")
+        unique_trio_nodes_len = []
+        unique_trio_nodes = {}
+        hap2unique_trio_nodes_m = np.array([])
     return unique_trio_nodes, unique_trio_nodes_len, hap2unique_trio_nodes_m
 
 def get_node_abundances(nodes_len, trio_nodes, trio_nodes_len, aln_file, start, end):
@@ -459,7 +465,7 @@ def optimize(a, nvert, paths, reduce_obj, max_strains,
     t1_start = time.perf_counter()
     t2_start = time.process_time()
     origin_paths_len = len(paths)
-    if origin_paths_len != 1:
+    if origin_paths_len != 1 and hap2trio_nodes_m.size:
         possible_strains_frequencies_mean = []
         possible_strains_idx = []
         for idx in range(len(paths)):
@@ -481,8 +487,12 @@ def optimize(a, nvert, paths, reduce_obj, max_strains,
                 possible_strains_frequencies_mean.append(frequencies_mean)
         # print("#strains / #paths = {} / {}".format(len(possible_strains_idx), origin_paths_len))
         paths = [paths[idx] for idx in possible_strains_idx]
-    else:
-        possible_strains_idx = [0]
+    # elif origin_paths_len == 1:
+    #     possible_strains_idx = [0]
+    elif origin_paths_len != 1 and hap2trio_nodes_m.size == 0:
+        if all(x == paths[0] for x in paths):
+            paths = [paths[0]]
+            same_path_flag = True
     t_stop = time.perf_counter()
     # print("Elapsed time: {:.1f} seconds".format(t_stop-t1_start))
 
@@ -639,6 +649,17 @@ def optimize(a, nvert, paths, reduce_obj, max_strains,
         if origin_paths_len == 1:
             if x_sol[0] < min_cov_final:
                 x_sol[0] = 0
+            return x_sol, objVal
+        elif origin_paths_len != 1 and hap2trio_nodes_m.size == 0:
+            if same_path_flag:
+                if x_sol[0] < min_cov_final:
+                    x_sol[0] = 0  
+                sol = [0] * origin_paths_len 
+                sol[0] = x_sol[0]    
+                x_sol = sol         
+            else:
+                for i in range(len(x_sol)):
+                    if x_sol[i] < min_cov_final: x_sol[i] = 0
             return x_sol, objVal
 
         for idx, frequencies_mean in enumerate(possible_strains_frequencies_mean):
