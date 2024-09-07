@@ -89,6 +89,7 @@ Strain-level taxonomic classification of metagenomic data using pangenome graphs
         --vg FILE                         Path to vg executable file.
         -n, --next                        Keep the temporary folder for later use at the strain level.
         --debug                           Keep the temporary folder for any situation.
+        --sample                          Sampling nodes(500) are used for small model testing (set for codeocean).
         -v, --verbose                     Detailed database build log.
         -t, --threads INT                 Number of processes to run in parallel(default: 64).
         --help, -h                        Print this help message.

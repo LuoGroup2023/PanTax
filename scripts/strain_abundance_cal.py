@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import sys, os, re, argparse, time, h5py
+import sys, os, re, argparse, time, h5py, random
 import numpy as np
 import pandas as pd
 from gurobipy import *
@@ -27,6 +27,7 @@ def main():
     parser.add_argument("-t", "--threads", dest="threads", type=int, default=64, help="Set number of threads used for species.")
     parser.add_argument("-gt", "--gurobi_threads", dest="gurobi_threads", type=int, default=1, help="Set number of threads used for Gurobi.")
     parser.add_argument("-s", "--save_graph_info", dest="s", type=int, default=0, help="Save graph information")
+    parser.add_argument("--sample", dest="sample", type=int, default=0, help="Sampling nodes are used for small model testing")
     args = parser.parse_args()
 
     global_t1_start = time.perf_counter()
@@ -36,6 +37,8 @@ def main():
     for arg in vars(args):
         print(arg, "=", getattr(args, arg))
     print()
+    global sample
+    sample = args.sample
     species_graph_info = os.path.join(args.db, "species_graph_info")
     if not os.path.exists(f"{species_graph_info}") and args.s:
         os.mkdir("species_graph_info")
@@ -399,9 +402,16 @@ def optimize(a, nvert, paths, min_cov, min_cov_final,
     x = m.addVars(list(range(npaths)), lb=0, ub=1.05*max(a), vtype=GRB.CONTINUOUS, name='x')
     X = [x[i] for i in range(npaths)]
     X = np.array([X]).reshape(npaths,1)    #Set x in an array for multiplication
+    nvert_list = list(range(nvert))
+    
+    if sample:
+        if len(nvert_list) > 500:
+            sample_nodes = random.sample(nvert_list, 500)
+            sample_nodes = sorted(sample_nodes)
+            nvert_list = sample_nodes
 
     # If objective involves absolute values, add extra variables
-    y = m.addVars(list(range(nvert)), lb=0, vtype=GRB.CONTINUOUS, name='y')
+    y = m.addVars(nvert_list, lb=0, vtype=GRB.CONTINUOUS, name='y')
     # add indicator variables to count strains
     if max_strains > 0:
         # add indicator variables for counting strains
@@ -431,11 +441,14 @@ def optimize(a, nvert, paths, min_cov, min_cov_final,
     n_eval = 0
     # for v in tqdm(range(nvert)):
     for v in range(nvert):
+        if sample:
+            if v not in nvert_list: continue
         # sum the calculated abundances of strains through v
         # sum_xv = 0
         # for idx, i in enumerate(P[v]):
         #     if i == 1:
         #         sum_xv += x[idx]
+        
         # memory may be expensive!!!
         sum_xv = np.dot(P[v,:],X)[0]
         abundance = a[v]

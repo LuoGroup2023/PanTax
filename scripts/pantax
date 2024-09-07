@@ -15,6 +15,7 @@ function print_help() {
   echo "        --vg FILE                         Path to vg executable file."
   echo "        -n, --next                        Keep the temporary folder for later use at the strain level." 
   echo "        --debug                           Keep the temporary folder for any situation."
+  echo "        --sample                          Sampling nodes(500) are used for small model testing (set for codeocean)."
   echo "        -v, --verbose                     Detailed database build log."
   echo "        -t, --threads INT                 Number of processes to run in parallel(default: 64)."
   echo "        --help, -h                        Print this help message."
@@ -74,6 +75,7 @@ unique_trio_nodes_fraction=0.3
 unique_trio_nodes_count=0.45
 min_cov=0
 min_depth=0
+sample=0
 
 wd=$(pwd)
 pantax_report=pantax_report.tsv
@@ -115,6 +117,10 @@ while [[ "$1" != "" ]]; do
         ;;
     "--debug")
         debug="True"
+        shift 1
+        ;;
+    "--sample")
+        sample=1
         shift 1
         ;;
     "-v" | "--verbose")
@@ -557,7 +563,7 @@ fi
 # ---------------------------- strain level binning and profiling ----------------------------
 if [ $strain_level_flag == "True" ]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Strain abundance estimation..."
-    python $script_dir/strain_abundance_cal.py -a $species_abund_threshold -fr $unique_trio_nodes_fraction -fc $unique_trio_nodes_count -c $min_cov -d $min_depth -t $threads -gt $gurobi_threads -s $save $pantax_db $genomes_info reads_classification.csv gfa_mapped.json $pantax_db/species_range.txt species_abundance.txt 
+    python $script_dir/strain_abundance_cal.py -a $species_abund_threshold -fr $unique_trio_nodes_fraction -fc $unique_trio_nodes_count -c $min_cov -d $min_depth -t $threads -gt $gurobi_threads -s $save --sample $sample $pantax_db $genomes_info reads_classification.csv gfa_mapped.json $pantax_db/species_range.txt species_abundance.txt 
     if [ $save == 1 ]; then
         if [ $reconstruction_flag == "False" ]; then
             mv species_graph_info $pantax_db
@@ -591,9 +597,11 @@ if [[ ( $strain_level_flag == "True" && $next_for_strain == "True" ) || ( $speci
         mv $wd/gfa_mapped.gaf $read_aln
     fi
 
-    mv $tmp_dir/reads_classification.csv $wd
+    cp $tmp_dir/reads_classification.csv $wd
     mv $wd/reads_classification.csv $pantax_report
     if [ $debug == "False" ]; then
+        mv $tmp_dir/reads_classification.csv $wd
+        mv $wd/reads_classification.csv $pantax_report
         rm -rf tmp
     fi
 fi
