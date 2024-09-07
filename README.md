@@ -14,6 +14,7 @@ Secondly, [pggb](https://github.com/pangenome/pggb.git) depends on vg version 1.
 ```
 conda install yichenli899::pantax -c conda-forge -c bioconda -c gurobi 
 ```
+If installing directly using conda, Samtools will display a library shortage warning, and Python pandas will also display a Pyarrow warning, but it does not affect usage.
 
 * **From source**
 ```
@@ -61,11 +62,20 @@ You'll need to run `/path/to/PanTax/scripts/pantax -f $genome_info --create`. Th
 Due to the large size of the reference pangenome we used for testing, we provide the `genomes_info.txt` used here. You need to download these genomes from NCBI RefSeq and update the actual paths in `genomes_info.txt`. Please note that NCBI RefSeq periodically updates their database, so we cannot guarantee that all the listed genomes will be available. Building the reference pangenome takes approximately one week with this `genomes_info.txt`. 
 
 * **Query with specified database**
+1. species level and strain level 
 ```
 # long read
 /path/to/PanTax/scripts/pantax -f $genome_info -l -r $fq -db $db --species-level --strain-level
 # short read(pair-end)
 /path/to/PanTax/scripts/pantax -f $genome_info -s -p -r $fq -db $db --species-level --strain-level
+```
+2. species level and then strain level
+```
+# long read
+# species level 
+/path/to/PanTax/scripts/pantax -f $genome_info -l -r $fq -db $db --species-level -n
+# strain level
+/path/to/PanTax/scripts/pantax -f $genome_info -l -r $fq -db $db --strain-level -n
 ```
 
 ## options
@@ -77,8 +87,10 @@ Strain-level taxonomic classification of metagenomic data using pangenome graphs
     General options:
         --create                          Create database only.
         --vg FILE                         Path to vg executable file.
+        -n, --next                        Keep the temporary folder for later use at the strain level.
+        --debug                           Keep the temporary folder for any situation.
         -v, --verbose                     Detailed database build log.
-        -t, --threads INT                 Number of processes to run in parallel (default: 64).
+        -t, --threads INT                 Number of processes to run in parallel(default: 64).
         --help, -h                        Print this help message.
         --version                         Print the version info.
     Database creation:
@@ -158,15 +170,15 @@ The third column is the average coverage of this strain.
 ```
 cd PanTax/example/hifi
 # species level
-sh ../../scripts/pantax -f ../example_genomes_info.txt -l -r long_reads.fq.gz --species-level
+sh ../../scripts/pantax -f ../example_genomes_info.txt -l -r long_reads.fq.gz --species-level -n
 # strain level
-sh ../../scripts/pantax -f ../example_genomes_info.txt -l -r long_reads.fq.gz --species-level --strain-level
+sh ../../scripts/pantax -f ../example_genomes_info.txt -l -r long_reads.fq.gz --strain-level -n
 ```
 * short read
 ```
 cd PanTax/example/ngs
 # species level
-sh ../../scripts/pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --species-level
+sh ../../scripts/pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --species-level -n
 # strain level
-sh ../../scripts/pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --species-level --strain-level
+sh ../../scripts/pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --strain-level -n
 ```

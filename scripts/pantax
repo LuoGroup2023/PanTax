@@ -13,6 +13,8 @@ function print_help() {
   echo "    General options:"
   echo "        --create                          Create database only."
   echo "        --vg FILE                         Path to vg executable file."
+  echo "        -n, --next                        Keep the temporary folder for later use at the strain level." 
+  echo "        --debug                           Keep the temporary folder for any situation."
   echo "        -v, --verbose                     Detailed database build log."
   echo "        -t, --threads INT                 Number of processes to run in parallel(default: 64)."
   echo "        --help, -h                        Print this help message."
@@ -49,8 +51,11 @@ function print_help() {
 timestamp=$(date "+%Y-%m-%d %H:%M:%S")
 echo "$timestamp - $0 $@"
 
+# set default value
 pantax_db="pantax_db"
 create_db="False"
+next_for_strain="False"
+debug="False"
 verbose="False"
 short_reads="False"
 long_reads="False"
@@ -60,7 +65,7 @@ long_read_fast_alignment="False"
 threads=64
 gurobi_threads=1
 
-species_level_flag="True"
+species_level_flag="False"
 strain_level_flag="False"
 isfilter=0
 save=0
@@ -78,6 +83,7 @@ if [[ "$1" == "" ]]; then
   print_help
 fi
 
+# get parameters
 while [[ "$1" != "" ]]; do
     case "$1" in
     "--help" | "-h")
@@ -102,6 +108,14 @@ while [[ "$1" != "" ]]; do
         shift 2
         ;;
         esac
+        ;;
+    "-n" | "--next")
+        next_for_strain="True"
+        shift 1
+        ;;
+    "--debug")
+        debug="True"
+        shift 1
         ;;
     "-v" | "--verbose")
         verbose="True"
@@ -311,7 +325,7 @@ while [[ "$1" != "" ]]; do
     esac
 done
 
-if [ $genomes_info ]; then
+if [ $genomes_info ] && [ -f $genomes_info ]; then
     genomes_info=$(readlink -f $genomes_info)
 else
     echo "genomes information file does not exist!"
@@ -319,7 +333,7 @@ else
 fi
 
 if [ $create_db == "False" ]; then
-    if [ $input_fq ]; then
+    if [ $input_fq ] && [ -f $input_fq ]; then
         input_fq=$(readlink -f $input_fq)
     else
         echo "fastq file does not exist!"
@@ -351,16 +365,35 @@ if [ $create_db == "False" ]; then
     echo "  input_fq: $input_fq"
     echo "  strain_level_flag: $strain_level_flag"
     echo "  species_level_flag: $species_level_flag"
+    if [ $strain_level_flag == "False" ] && [ $species_level_flag == "False" ]; then
+        echo "No species or strain option specified. Please set --species-level or --strain-level."
+        exit 1
+    fi
 fi
+
+# some tools work in different directory when install with conda or from source.
+if [[ $(which $0) == *conda* ]]; then
+    conda_run_flag="True"
+else 
+    conda_run_flag="False"
+fi
+# set tools working path
 script_path=$(readlink -f $0)
 script_dir=$(dirname $script_path)
-tools_dir=$(dirname $script_dir)/tools
+if [ $conda_run_flag == "True" ]; then
+    tools_dir=$script_dir/tools
+    fastix=$tools_dir/fastix
+else
+    tools_dir=$(dirname $script_dir)/tools
+    fastix=$tools_dir/fastix/bin/fastix
+fi
 if [ $vg ]; then
     :
 else
     vg=$tools_dir/vg
 fi
 
+# set pantax_db and tmp directory
 if [ ! -d $pantax_db ]; then
     mkdir -p $pantax_db
 # else
@@ -369,13 +402,14 @@ if [ ! -d $pantax_db ]; then
 fi
 pantax_db=$(readlink -f $pantax_db)
 # cd $pantax_db
-if [ -d tmp ]; then
+if [ $next_for_strain == "False" ] && [ -d tmp ] && [ $debug == "False" ]; then
     rm -rf tmp
 fi
 mkdir -p tmp
 tmp_dir=$(readlink -f tmp)
 cd $tmp_dir
 
+# ---------------------------- Building reference pangenome ----------------------------
 if [ ! -f $pantax_db/reference_pangenome.gfa ]; then 
     new_pantax_db=$pantax_db
     pantax_db=$tmp_dir
@@ -401,11 +435,13 @@ if [ $reconstruction_flag == "True" ]; then
                 species_dir=${species_dir%.txt}
                 if [ ! -d $species_dir ]; then
                     mkdir -p $species_dir
+                else
+                    continue
                 fi
                 while IFS= read genome; do
                     sample_genome=$(basename $genome | cut -f 1,2 -d '_')
                     # echo $genome
-                    $tools_dir/fastix/bin/fastix $genome -p "${sample_genome}#1#" | bgzip -@ $threads -c > ${species_dir}/${sample_genome}.fa.gz
+                    $fastix $genome -p "${sample_genome}#1#" | bgzip -@ $threads -c > ${species_dir}/${sample_genome}.fa.gz
                 done < $f
                 genomes_list=$(find $species_dir -name "*.fa.gz" -exec echo -n "{} " \;)
                 num=$(ls $species_dir/*.fa.gz | wc -l)
@@ -444,11 +480,15 @@ fi
 
 if [ $create_db == "True" ];then
     cd ..
-    rm -rf tmp
+    if [ $debug == "False" ]; then
+        rm -rf tmp
+    fi
     exit 0
 fi
 
-if [ $short_reads == "True" ] || [ $long_read_fast_alignment == "True" ]; then
+# ---------------------------- Reads alignment ----------------------------
+# short reads alignment(the latest vg giraffe can be used for long reads)
+if [[ $species_level_flag == "True" && ( $short_reads == "True" || $long_read_fast_alignment == "True" ) ]]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Reads alignment with vg giraffe."    
     # this step produce three index files: reference_pangenome.giraffe.gbz, reference_pangenome.dist, reference_pangenome.min.
     # default mode(quick)
@@ -472,14 +512,15 @@ if [ $short_reads == "True" ] || [ $long_read_fast_alignment == "True" ]; then
     elif [ $pair_short_read == "False" ]; then
         $vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -f $input_fq -t $threads --named-coordinates -o gaf > gfa_mapped.gaf
     fi
-    if [ $strain_level_flag == "True" ]; then
+    if [ $strain_level_flag == "True" ] || [ $next_for_strain == "True" ]; then
         $vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -i -f $input_fq -t $threads --named-coordinates -o json > gfa_mapped.json
     fi
 fi
 
-if [ $long_reads == "True" ] && [ $long_read_fast_alignment == "False" ]; then
+# long reads alignment
+if [ $species_level_flag == "True" ] && [ $long_reads == "True" ] && [ $long_read_fast_alignment == "False" ]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Reads alignment with Graphaligner..."
-    if [ $strain_level_flag == "True" ]; then
+    if [ $strain_level_flag == "True" ] || [ $next_for_strain == "True" ]; then
         GraphAligner -g $pantax_db/reference_pangenome.gfa -f $input_fq -a gfa_mapped.gaf -a gfa_mapped.json -x vg -t $threads
         python $script_dir/gaf_filter.py -i gfa_mapped.gaf
         python $script_dir/gaf_filter.py -i gfa_mapped_filtered.gaf -j gfa_mapped.json -s $pantax_db/species_range.txt
@@ -496,14 +537,14 @@ if [ $long_reads == "True" ] && [ $long_read_fast_alignment == "False" ]; then
     fi
 fi
 
-if [ -f "gfa_mapped.gaf" ] && [ -f $pantax_db/species_range.txt ]; then
+# ---------------------------- Reads classification(binning) ----------------------------
+if [ $species_level_flag == "True" ] && [ -f "gfa_mapped.gaf" ] && [ -f $pantax_db/species_range.txt ]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Read classification..."
     # python $script_dir/read_classification2.py species_range.txt gfa_mapped.json
     python $script_dir/read_classification.py -s $pantax_db/species_range.txt -m gfa_mapped.gaf
-else
-    exit 1 
 fi
 
+# ---------------------------- species level binning and profiling ----------------------------
 if [ $species_level_flag == "True" ]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Species abundance estimation..."
     if [ $short_reads == "True" ]; then
@@ -513,7 +554,7 @@ if [ $species_level_flag == "True" ]; then
     fi
 fi 
 
-
+# ---------------------------- strain level binning and profiling ----------------------------
 if [ $strain_level_flag == "True" ]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Strain abundance estimation..."
     python $script_dir/strain_abundance_cal.py -a $species_abund_threshold -fr $unique_trio_nodes_fraction -fc $unique_trio_nodes_count -c $min_cov -d $min_depth -t $threads -gt $gurobi_threads -s $save $pantax_db $genomes_info reads_classification.csv gfa_mapped.json $pantax_db/species_range.txt species_abundance.txt 
@@ -526,28 +567,34 @@ if [ $strain_level_flag == "True" ]; then
     fi
 fi
 
+# move and rename files
 cd ..
 if [ $species_level_flag == "True" ]; then
-    mv $tmp_dir/species_abundance.txt $wd
+    cp $tmp_dir/species_abundance.txt $wd
     if [ $pantax_output ]; then
         specie_abund_file=${pantax_output}_species_abundance.txt
-        mv species_abundance.txt $specie_abund_file        
+        mv $wd/species_abundance.txt $specie_abund_file        
     fi
 fi
 if [ $strain_level_flag == "True" ]; then
-    mv $tmp_dir/strain_abundance.txt $wd
+    cp $tmp_dir/strain_abundance.txt $wd
     if [ $pantax_output ]; then
         strain_abund_file=${pantax_output}_strain_abundance.txt
-        mv strain_abundance.txt $strain_abund_file
+        mv $wd/strain_abundance.txt $strain_abund_file
     fi
 fi
-if [ $read_aln ]; then
-    mv $tmp_dir/gfa_mapped.gaf $wd
-    mv gfa_mapped.gaf $read_aln
+
+# if next_for_strain is true, we will save tmp files for strain level profiling.
+if [[ ( $strain_level_flag == "True" && $next_for_strain == "True" ) || ( $species_level_flag == "True" && $next_for_strain == "False" ) ]]; then
+    if [ $read_aln ]; then
+        mv $tmp_dir/gfa_mapped.gaf $wd
+        mv $wd/gfa_mapped.gaf $read_aln
+    fi
+
+    mv $tmp_dir/reads_classification.csv $wd
+    mv $wd/reads_classification.csv $pantax_report
+    if [ $debug == "False" ]; then
+        rm -rf tmp
+    fi
 fi
-
-mv $tmp_dir/reads_classification.csv $wd
-mv reads_classification.csv $pantax_report
-
-rm -rf tmp
 echo "$(date "+%Y-%m-%d %H:%M:%S") - PanTax Done."
