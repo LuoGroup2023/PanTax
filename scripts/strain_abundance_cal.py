@@ -7,6 +7,7 @@ from tqdm import tqdm # progress tracker
 from functools import partial
 from aln_json_process import read_group
 import concurrent.futures 
+from toolkits import timeit, Logger
 os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
 usage = "Compute strain abundance"
@@ -27,12 +28,13 @@ def main():
     parser.add_argument("-t", "--threads", dest="threads", type=int, default=64, help="Set number of threads used for species.")
     parser.add_argument("-gt", "--gurobi_threads", dest="gurobi_threads", type=int, default=1, help="Set number of threads used for Gurobi.")
     parser.add_argument("-s", "--save_graph_info", dest="s", type=int, default=0, help="Save graph information")
+    parser.add_argument("-v", "--verbose", dest="is_show_log", action="store_true", help="Show log")
     parser.add_argument("--sample", dest="sample", type=int, default=0, help="Sampling nodes are used for small model testing")
     args = parser.parse_args()
 
     global_t1_start = time.perf_counter()
     global_t2_start = time.process_time()
-
+    log = Logger().logger
     print("\nProgram settings:\n")
     for arg in vars(args):
         print(arg, "=", getattr(args, arg))
@@ -48,9 +50,10 @@ def main():
     if len(otu_to_range) == 1:
         args.gurobi_threads = max(args.threads, args.gurobi_threads)
         args.threads = 1
-    global read_group_data
+    global read_group_data, is_show_log
+    is_show_log = args.is_show_log
     read_group_data = read_group(args.read_cls, args.aln_file) 
-    print("Parallel estimation of abundance for each strain of every species(this step takes a long time)...")
+    log.info("Parallel estimation of abundance for each strain of every species(this step takes a long time)...")
     # for key, value in otu_to_range.items():
     #     result = parallel_optimize_otu(key, value, pantax_db=args.db, aln_file=args.aln_file, min_depth=args.min_depth, reduce_obj=args.reduce_obj, 
     #                           minimization_min_cov=minimization_min_cov, min_cov=args.min_cov, unique_trio_nodes_fraction=args.fr, unique_trio_nodes_mean_count_fraction=args.fc,
@@ -85,9 +88,9 @@ def main():
     t3_stop = time.perf_counter()
     t4_stop = time.process_time()
 
-    print("\noptimize_strains completed")
-    print("Elapsed time: {:.1f} seconds".format(t3_stop-global_t1_start))
-    print("CPU process time: {:.1f} seconds".format(t4_stop-global_t2_start))
+    log.info("All strains optimize completed")
+    log.info("Elapsed time: {:.1f} seconds".format(t3_stop-global_t1_start))
+    log.info("CPU process time: {:.1f} seconds".format(t4_stop-global_t2_start))
     print()
     return
 
@@ -118,9 +121,9 @@ def read_h5py_file(file_name):
 def parallel_optimize_otu(otu, otu_range, pantax_db, min_depth, minimization_min_cov, min_cov, unique_trio_nodes_fraction, unique_trio_nodes_mean_count_fraction, s, threads):
     start = int(otu_range[0])-1
     end = int(otu_range[1])-1 
-    print(f"Reading {otu}.gfa file...\n")
+    if is_show_log: print(f"Reading {otu}.gfa file...\n")
     if not s:
-        print("Skipping save graph information")
+        if is_show_log: print("Skipping save graph information")
         if os.path.exists(f"{pantax_db}/species_gfa"):
             paths, nodes_len_npy  = read_gfa(f"{pantax_db}/species_gfa/{otu}.gfa")
         elif os.path.exists(f"{pantax_db}/species_graph_info"):
@@ -134,7 +137,7 @@ def parallel_optimize_otu(otu, otu_range, pantax_db, min_depth, minimization_min
     unique_trio_nodes, unique_trio_nodes_len, hap2unique_trio_nodes_m = trio_nodes_info(paths, nodes_len_npy) 
     node_abundances, unique_trio_node_abundances = get_node_abundances(read_group_data[otu], list(nodes_len_npy), unique_trio_nodes, unique_trio_nodes_len, start)  
     non_zero_count = sum(1 for elem in node_abundances if elem != 0)
-    print(f"{otu} species node abundance > 0 number:{non_zero_count}\n")
+    if is_show_log: print(f"{otu} species node abundance > 0 number:{non_zero_count}\n")
     otu_paths = list(paths.values())
     haps_id = list(paths.keys())
     nvert = end-start+1      
@@ -306,7 +309,7 @@ def get_node_abundances(reads_info, nodes_len, trio_nodes, trio_nodes_len, start
     trio_nodes_bases_count = {}
     for i in range(len(trio_nodes)):
         trio_nodes_bases_count[i] = 0
-    print("Processing alignments...")
+    if is_show_log: print("Processing alignments...")
     for read_info in reads_info:
         read_nodes = []
         read_nodes_len = {}
@@ -333,7 +336,7 @@ def get_node_abundances(reads_info, nodes_len, trio_nodes, trio_nodes_len, start
                     continue
             trio_nodes_bases_count[idx] += read_trio_nodes_len[i]
     node_abundance_list = []
-    print("Computing node abundance rates...")
+    if is_show_log: print("Computing node abundance rates...")
     for node, node_len in enumerate(nodes_len):
         aligned_len = bases_per_node[node]
         if node_len > 0:
@@ -342,7 +345,7 @@ def get_node_abundances(reads_info, nodes_len, trio_nodes, trio_nodes_len, start
             raise ZeroDivisionError(f"Node length 0 for node {node}")
         node_abundance_list.append(node_abundance)
     trio_node_abundance_list = []
-    print("Computing trio node abundance rates...")
+    if is_show_log: print("Computing trio node abundance rates...")
     for i, trio_node_len in enumerate(trio_nodes_len):
         aligned_len = trio_nodes_bases_count[i]
         if trio_node_len > 0:
@@ -376,13 +379,13 @@ def optimize(a, nvert, paths, min_cov, min_cov_final,
             frequencies = np.zeros(len(trio_node_abundances))
             frequencies[selected_indices] = trio_node_abundances[selected_indices]
             count_greater_than_zero = np.sum(frequencies > 0)
-            # print(f"{count_greater_than_zero}/{len(selected_indices)}")
+            if is_show_log: print(f"\t\tTrio node abundance > 0 ratio: {count_greater_than_zero}/{len(selected_indices)}")
             if count_greater_than_zero/len(selected_indices) < unique_trio_nodes_fraction: continue
             possible_strains_idx.append(idx)
             non_zero_frequencies = frequencies[frequencies > 0]
             frequencies_mean = np.mean(non_zero_frequencies) if len(non_zero_frequencies) > 0 else 0
             possible_strains_frequencies_mean.append(frequencies_mean)
-        # print("#strains / #paths = {} / {}".format(len(possible_strains_idx), origin_paths_len))
+        if is_show_log: print("\t\tFisrt filter #strains / #paths = {} / {}".format(len(possible_strains_idx), origin_paths_len))
         paths = [paths[idx] for idx in possible_strains_idx]
     # elif origin_paths_len == 1:
     #     possible_strains_idx = [0]
@@ -391,7 +394,7 @@ def optimize(a, nvert, paths, min_cov, min_cov_final,
             paths = [paths[0]]
             same_path_flag = True
     # t_stop = time.perf_counter()
-    # print("Elapsed time: {:.1f} seconds".format(t_stop-t1_start))
+    # print("     [PAO first filter based on fr] - Elapsed time: {:.1f} seconds".format(t_stop-t1_start))
 
     # absolute error
     m = Model('lp')
@@ -448,7 +451,7 @@ def optimize(a, nvert, paths, min_cov, min_cov_final,
         # for idx, i in enumerate(P[v]):
         #     if i == 1:
         #         sum_xv += x[idx]
-        
+
         # memory may be expensive!!!
         sum_xv = np.dot(P[v,:],X)[0]
         abundance = a[v]
@@ -476,21 +479,21 @@ def optimize(a, nvert, paths, min_cov, min_cov_final,
     m.Params.Method = 4
 
     #Minimize the model for the given objective function and constraints
-    print("\n*** Phase 1 optimization***\n")
+    if is_show_log: print("\t\t*** Phase 1 optimization***")
     m.optimize()
 
-    print("Number of solutions = {}".format(m.solcount))
+    # print("Number of solutions = {}".format(m.solcount))
     if m.status == GRB.Status.OPTIMAL:
         x_sol = []
         for v in m.getVars():
             if 'x' in v.varName:
                 x_sol.append(v.x)
-        print('\nObjective value: %g' % m.objVal)
+        if is_show_log: print(f"\t\tObjective value: {m.objVal}")
         objVal = m.objVal
-        # print(f"first sol:{x_sol}\n")
+        if is_show_log: print(f"\t\tFirst sol:{x_sol}\n")
         selected_strains = [1 if cov > min_cov_final else 0 for cov in x_sol]
         nstrains = sum(selected_strains)
-        print("#strains / #paths = {} / {}".format(nstrains, origin_paths_len))
+        if is_show_log: print("\t\tFirst optimization #strains / #paths = {} / {}".format(nstrains, npaths))
 
         if origin_paths_len == 1:
             if x_sol[0] < min_cov_final:
@@ -513,13 +516,15 @@ def optimize(a, nvert, paths, min_cov, min_cov_final,
                 selected_strains[idx] = 0
                 continue
             f = abs(x_sol[idx]-frequencies_mean)/(x_sol[idx]+frequencies_mean)
-            # print(f"idx:{idx}\tfrequencies_mean:{frequencies_mean}\txsol:{x_sol[idx]}\tf:{f}")
+            if is_show_log: print(f"\t\tidx:{idx}\tfrequencies_mean:{frequencies_mean}\txsol:{x_sol[idx]}\tf:{f}")
             if f > unique_trio_nodes_mean_count_fraction:
                 selected_strains[idx] = 0
+
         nstrains = sum(selected_strains)
+        if is_show_log: print("\t\tSecond filter #strains / #paths = {} / {}".format(nstrains, npaths))
 
         # run phase 2 optimization:
-        print("\n*** Phase 2 optimization***\n")
+        if is_show_log: print("\t\t*** Phase 2 optimization***")
         m.reset()
         for i in range(npaths):
             if selected_strains[i] == 0:
@@ -530,12 +535,12 @@ def optimize(a, nvert, paths, min_cov, min_cov_final,
         for v in m.getVars():
             if 'x' in v.varName:
                 x_final.append(v.x)
-        print('Objective value: %g' % m.objVal)
+        if is_show_log: print(f"\t\tObjective value: {m.objVal}")
         objVal = m.objVal
 
         selected_strains = [1 if cov > min_cov_final else 0 for cov in x_final]
         nstrains = sum(selected_strains)
-        print("#strains / #paths = {} / {}".format(nstrains, npaths))
+        if is_show_log: print("\t\tSecond optimization #strains / #paths = {} / {}".format(nstrains, npaths))
 
         sol = [0] * origin_paths_len
         i = 0
@@ -546,9 +551,10 @@ def optimize(a, nvert, paths, min_cov, min_cov_final,
 
         t1_stop = time.perf_counter()
         t2_stop = time.process_time()
-        print("\nStrain path optimize completed")
-        print("Elapsed time: {:.1f} seconds".format(t1_stop-t1_start))
-        print("CPU process time: {:.1f} seconds".format(t2_stop-t2_start))
+        if is_show_log:
+            print("\nStrain path optimize completed")
+            print("Elapsed time: {:.1f} seconds".format(t1_stop-t1_start))
+            print("CPU process time: {:.1f} seconds".format(t2_stop-t2_start))
         return(sol, objVal)
 
     else:

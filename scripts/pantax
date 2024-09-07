@@ -563,7 +563,11 @@ fi
 # ---------------------------- strain level binning and profiling ----------------------------
 if [ $strain_level_flag == "True" ]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Strain abundance estimation..."
-    python $script_dir/strain_abundance_cal.py -a $species_abund_threshold -fr $unique_trio_nodes_fraction -fc $unique_trio_nodes_count -c $min_cov -d $min_depth -t $threads -gt $gurobi_threads -s $save --sample $sample $pantax_db $genomes_info reads_classification.csv gfa_mapped.json $pantax_db/species_range.txt species_abundance.txt 
+    if [ $verbose == "True" ]; then
+        python $script_dir/strain_abundance_cal.py -a $species_abund_threshold -fr $unique_trio_nodes_fraction -fc $unique_trio_nodes_count -c $min_cov -d $min_depth -t $threads -gt $gurobi_threads -s $save --sample $sample -v $pantax_db $genomes_info reads_classification.csv gfa_mapped.json $pantax_db/species_range.txt species_abundance.txt 
+    else
+        python $script_dir/strain_abundance_cal.py -a $species_abund_threshold -fr $unique_trio_nodes_fraction -fc $unique_trio_nodes_count -c $min_cov -d $min_depth -t $threads -gt $gurobi_threads -s $save --sample $sample $pantax_db $genomes_info reads_classification.csv gfa_mapped.json $pantax_db/species_range.txt species_abundance.txt 
+    fi
     if [ $save == 1 ]; then
         if [ $reconstruction_flag == "False" ]; then
             mv species_graph_info $pantax_db
