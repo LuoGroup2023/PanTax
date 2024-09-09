@@ -92,7 +92,7 @@ while [[ "$1" != "" ]]; do
         print_help
         ;;
     "--version")
-        echo "PanTax version v1.0.0"
+        echo "PanTax version v1.0.1"
         exit 0 
         ;;
     "--create")
