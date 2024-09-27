@@ -368,11 +368,11 @@ def optimize(a, nvert, paths, min_cov, min_cov_final,
     origin_paths_len = len(paths)
     max_strains = origin_paths_len
     trio_node_abundances = np.array(trio_node_abundances)
-    row_sums = np.sum(hap2trio_nodes_m, axis=1)
     same_path_flag = False
     if origin_paths_len != 1 and hap2trio_nodes_m.size:
         possible_strains_frequencies_mean = []
         possible_strains_idx = []
+        row_sums = np.sum(hap2trio_nodes_m, axis=1)
         for idx in range(len(paths)):
             selected_indices = np.where((hap2trio_nodes_m[:, idx] == 1) & (row_sums == 1))[0]
             if len(selected_indices) == 0: continue
