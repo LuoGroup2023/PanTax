@@ -387,7 +387,8 @@ fi
 script_path=$(readlink -f $0)
 script_dir=$(dirname $script_path)
 if [ $conda_run_flag == "True" ]; then
-    tools_dir=$script_dir/tools
+    # tools_dir=$script_dir/tools
+    tools_dir=$script_dir
     fastix=$tools_dir/fastix
 else
     tools_dir=$(dirname $script_dir)/tools
@@ -411,9 +412,18 @@ pantax_db=$(readlink -f $pantax_db)
 if [ $next_for_strain == "False" ] && [ -d tmp ] && [ $debug == "False" ]; then
     rm -rf tmp
 fi
+
 mkdir -p tmp
 tmp_dir=$(readlink -f tmp)
 cd $tmp_dir
+cleanup() {
+    echo "$(date "+%Y-%m-%d %H:%M:%S") - PanTax encountered an exception while running and has deleted the tmp folder."
+    echo "If you need to start checking not to delete the tmp directory, please add the --debug option."
+    rm -rf $tmp_dir
+}
+if [ $debug == "False" ]; then
+    trap cleanup ERR
+fi
 
 # ---------------------------- Building reference pangenome ----------------------------
 if [ ! -f $pantax_db/reference_pangenome.gfa ]; then 

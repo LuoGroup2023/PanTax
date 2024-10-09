@@ -12,7 +12,10 @@ Secondly, [pggb](https://github.com/pangenome/pggb.git) depends on vg version 1.
 * **From conda**
 
 ```
-conda install yichenli899::pantax -c conda-forge -c bioconda -c gurobi 
+conda install yichenli899::pantax -c bioconda -c conda-forge -c gurobi 
+
+## Note that if you install with conda, you don't need to specified the absolute path of pantax.
+pantax -h
 ```
 If installing directly using conda, Samtools will display a library shortage warning, and Python pandas will also display a Pyarrow warning, but it does not affect usage.
 
@@ -30,6 +33,7 @@ conda activate vg
 conda install vg=1.52 -c bioconda
 ln -fs /path/to/miniconda3/envs/vg/bin/vg PanTax/tools
 ```
+
 
 ## Genome preprocessing
 
@@ -182,4 +186,12 @@ cd PanTax/example/ngs
 sh ../../scripts/pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --species-level -n
 # strain level
 sh ../../scripts/pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --strain-level -n
+```
+
+## Possible issues during installation (optional)
+* `gsl` incompatibility
+
+During the "Building reference pangenome" step, there were no errors reported by `pantax` and an interrupt occurred without obtaining any results. You should run the command `wfmash -h` to check whether `wfmash` can work. If you encounter a error `symbol lookup error: ../lib/libgsl.so.25: undefined symbol: cblas_ctrmv` after running it, this indicates a GSL incompatibility issue. The `gsl` should be installed from the `conda-forge` channel `https://anaconda.org/conda-forge/gsl/files` instead of the `anaconda` channel `https://anaconda.org/anaconda/gsl/files`. This issue is caused by the channel settings of conda, so you should specify the channel with the `-c` flag during installation.
+```
+conda install pantax -c bioconda -c conda-forge -c gurobi
 ```
