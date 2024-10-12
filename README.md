@@ -7,17 +7,19 @@ The dependencies of PaxTax can generally be installed through conda. There are t
 
 Firstly, PanTax relies on the [Gurobi Optimizer](https://www.gurobi.com/solutions/gurobi-optimizer/) Python package. While the package download is included in the environment.yaml file, a license must be obtained from the official website to use it for large model optimizations.
 
-Secondly, [pggb](https://github.com/pangenome/pggb.git) depends on vg version 1.40, which is incompatible with the version of vg we use for read alignment. We recommend using a more recent version of [vg](https://github.com/vgteam/vg.git), specifically vg>=1.52. We have included the vg 1.52 executable file (default path) in the tools directory. If this is not available, we suggest creating a new environment with conda and installing vg. You can then place it in the tools directory via a symbolic link or specify its path directly using the `--vg` option.
+Secondly, old version [pggb](https://github.com/pangenome/pggb.git) 0.5.4 depends on vg version 1.40, which is incompatible with the version of vg we use for read alignment. We recommend using a more recent version of [vg](https://github.com/vgteam/vg.git), specifically vg>=1.52. We have included the vg 1.52 executable file (default path) in the tools directory. If this is not available, we suggest creating a new environment with conda and installing vg. You can then place it in the tools directory via a symbolic link or specify its path directly using the `--vg` option.
 
-* **From conda**
+> By the way, the version of the main tools we used in the paper's experiments are `pggb` 0.5.4 (requirement `vg` 1.40), `vg` 1.52, `gurobipy` 11.0.2.
+
+* **From bioconda**
 
 ```
-conda install yichenli899::pantax -c bioconda -c conda-forge -c gurobi 
+mamba install -c bioconda -c conda-forge -c gurobi pantax gurobi 
 
 ## Note that if you install with conda, you don't need to specified the absolute path of pantax.
 pantax -h
 ```
-If installing directly using conda, Samtools will display a library shortage warning, and Python pandas will also display a Pyarrow warning, but it does not affect usage.
+**Due to the strong recommendation of bioconda to use the latest version of the tools, `PanTax` on bioconda depends on `pggb` 0.6.0 and `vg` 1.59.**
 
 * **From source**
 ```
