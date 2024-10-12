@@ -14,7 +14,7 @@ Secondly, old version [pggb](https://github.com/pangenome/pggb.git) 0.5.4 depend
 * **From bioconda**
 
 ```
-mamba install -c bioconda -c conda-forge -c gurobi pantax gurobi 
+conda install -c bioconda -c conda-forge -c gurobi pantax gurobi 
 
 ## Note that if you install with conda, you don't need to specified the absolute path of pantax.
 pantax -h
