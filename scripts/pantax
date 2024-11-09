@@ -12,6 +12,7 @@ function print_help() {
   echo ""
   echo "    General options:"
   echo "        --create                          Create database only."
+  echo "        --index                           Create index only (for short read)."
   echo "        --vg FILE                         Path to vg executable file."
   echo "        -n, --next                        Keep the temporary folder for later use at the strain level." 
   echo "        --debug                           Keep the temporary folder for any situation."
@@ -55,6 +56,7 @@ echo "$timestamp - $0 $@"
 # set default value
 pantax_db="pantax_db"
 create_db="False"
+create_index="False"
 next_for_strain="False"
 debug="False"
 verbose="False"
@@ -68,7 +70,7 @@ gurobi_threads=1
 
 species_level_flag="False"
 strain_level_flag="False"
-isfilter=0
+isfilter=1
 save=0
 species_abund_threshold=0.0001
 unique_trio_nodes_fraction=0.3
@@ -88,246 +90,39 @@ fi
 # get parameters
 while [[ "$1" != "" ]]; do
     case "$1" in
-    "--help" | "-h")
-        print_help
-        ;;
-    "--version")
-        echo "PanTax version v1.0.2"
-        exit 0 
-        ;;
-    "--create")
-        create_db="True"
-        shift 1
-        ;;
-    "--vg")
-        case "$2" in
-        "")
-        echo "Error: $1 expects an argument"
-        exit 1
-        ;;
-        *)
-        vg="$2"
-        shift 2
-        ;;
-        esac
-        ;;
-    "-n" | "--next")
-        next_for_strain="True"
-        shift 1
-        ;;
-    "--debug")
-        debug="True"
-        shift 1
-        ;;
-    "--sample")
-        sample=1
-        shift 1
-        ;;
-    "-v" | "--verbose")
-        verbose="True"
-        shift 1
-        ;;
-    "-f" | "--genomesInformation")
-        case "$2" in
-        "")
-        echo "Error: $1 expects an argument"
-        exit 1
-        ;;
-        *)
-        genomes_info="$2"
-        shift 2
-        ;;
-        esac
-        ;;
-    "-db")
-        case "$2" in
-        "")
-        echo "Error: $1 expects an argument"
-        exit 1
-        ;;
-        *)
-        pantax_db="$2"
-        shift 2
-        ;;
-        esac
-        ;;
-    "-s" | "--short-read")
-        short_reads="True"
-        shift 1
-        ;;
-    "-l" | "--long-read")
-        long_reads="True"
-        shift 1
-        ;;
-    "--best")
-        short_read_best_alignment="True"
-        shift 1
-        ;;
-    "--fast")
-        long_read_fast_alignment="True"
-        shift 1
-        ;;     
-    "-r" | "--fastq-in")
-        case "$2" in
-        "")
-        echo "Error: $1 expects an argument"
-        exit 1
-        ;;
-        *)
-        input_fq="$2"
-        shift 2
-        ;;
-        esac
-        ;;
-    "-p" | "--paired")
-        pair_short_read="True"
-        shift 1
-        ;;
-
-    "--strain-level")
-        strain_level_flag="True"
-        shift 1
-        ;;
-    "--species-level")
-        species_level_flag="True"
-        shift 1
-        ;;
-    "--filter")
-        isfilter=1
-        shift 1
-        ;;
-    "-a")
-        case "$2" in
-        "")
-        echo "Error: $1 expects an argument"
-        exit 1
-        ;;
-        *)
-        species_abund_threshold="$2"
-        shift 2
-        ;;
-        esac
-        ;;
-    "-fr")
-        case "$2" in
-        "")
-        echo "Error: $1 expects an argument"
-        exit 1
-        ;;
-        *)
-        unique_trio_nodes_fraction="$2"
-        shift 2
-        ;;
-        esac
-        ;;    
-    "-fc")
-        case "$2" in
-        "")
-        echo "Error: $1 expects an argument"
-        exit 1
-        ;;
-        *)
-        unique_trio_nodes_count="$2"
-        shift 2
-        ;;
-        esac
-        ;;     
-    "--min_cov")
-        case "$2" in
-        "")
-        echo "Error: $1 expects an argument"
-        exit 1
-        ;;
-        *)
-        min_cov="$2"
-        shift 2
-        ;;
-        esac
-        ;;
-    "--min_depth")
-        case "$2" in
-        "")
-        echo "Error: $1 expects an argument"
-        exit 1
-        ;;
-        *)
-        min_depth="$2"
-        shift 2
-        ;;
-        esac
-        ;;
-    "-g" | "--save")
-        save=1
-        shift 1
-        ;;                
-    "-S" | "--classified-out")
-        case "$2" in
-        "")
-        echo "Error: $1 expects an argument"
-        exit 1
-        ;;
-        *)
-        read_aln="$2".gaf
-        shift 2
-        ;;
-        esac
-        ;;                                                                           
-    "-R" | "--report")
-        case "$2" in
-        "")
-        echo "Error: $1 expects an argument"
-        exit 1
-        ;;
-        *)
-        pantax_report="$2".tsv
-        shift 2
-        ;;
-        esac
-        ;; 
-    "-o" | "--output")
-        case "$2" in
-        "")
-        echo "Error: $1 expects an argument"
-        exit 1
-        ;;
-        *)
-        pantax_output=$2
-        shift 2
-        ;;
-        esac
-        ;; 
-    "-t" | "--threads")
-        case "$2" in
-        "")
-        echo "Error: $1 expects an argument"
-        exit 1
-        ;;
-        *)
-        threads="$2"
-        shift 2
-        ;;
-        esac
-        ;;      
-    "-gt")
-        case "$2" in
-        "")
-        echo "Error: $1 expects an argument"
-        exit 1
-        ;;
-        *)
-        gurobi_threads="$2"
-        shift 2
-        ;;
-        esac
-        ;;                                                              
-    --)
-        shift
-        break
-        ;;
-    *)
-        echo "Error: invalid option \"$1\""
-        exit 1
-        ;;
+    "--help" | "-h") print_help;;
+    "--version") echo "PanTax version v1.0.2"; exit 0;;
+    "--create") create_db="True"; shift 1;;
+    "--index") create_index="True"; shift 1;;
+    "--vg") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { vg="$2"; shift 2; } ;;
+    "-n" | "--next") next_for_strain="True"; shift 1;;
+    "--debug") debug="True"; shift 1;;
+    "--sample") sample=1; shift 1;;
+    "-v" | "--verbose") verbose="True"; shift 1 ;;
+    "-f" | "--genomesInformation") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { genomes_info="$2"; shift 2; } ;;
+    "-db") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pantax_db="$2"; shift 2; } ;;
+    "-s" | "--short-read") short_reads="True"; shift 1;;
+    "-l" | "--long-read") long_reads="True"; shift 1;;
+    "--best") short_read_best_alignment="True"; shift 1;;
+    "--fast") long_read_fast_alignment="True"; shift 1;;     
+    "-r" | "--fastq-in") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { input_fq="$2"; shift 2; } ;;
+    "-p" | "--paired") pair_short_read="True"; shift 1;;
+    "--strain-level") strain_level_flag="True"; shift 1;;
+    "--species-level") species_level_flag="True"; shift 1;;
+    "--filter") isfilter=$2; shift 2;;
+    "-a") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { species_abund_threshold="$2"; shift 2; } ;;
+    "-fr") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { unique_trio_nodes_fraction="$2"; shift 2; } ;;   
+    "-fc") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { unique_trio_nodes_count="$2"; shift 2; } ;;    
+    "--min_cov") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { min_cov="$2"; shift 2; } ;;
+    "--min_depth") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { min_depth="$2"; shift 2; } ;;
+    "-g" | "--save") save=1; shift 1;;                
+    "-S" | "--classified-out") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { read_aln="$2".gaf; shift 2; } ;;                                                                          
+    "-R" | "--report") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pantax_report="$2".tsv; shift 2; } ;;
+    "-o" | "--output") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pantax_output=$2; shift 2; } ;;
+    "-t" | "--threads") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { threads=$2; shift 2; } ;;
+    "-gt") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { gurobi_threads=$2; shift 2; } ;;                                                             
+    --) shift; break;;
+    *) echo "Error: invalid option \"$1\""; exit 1;;
     esac
 done
 
@@ -338,7 +133,7 @@ else
     exit 1
 fi
 
-if [ $create_db == "False" ]; then
+if [ $create_db == "False" ] && [ $create_index == "False" ]; then
     if [ $input_fq ] && [ -f $input_fq ]; then
         input_fq=$(readlink -f $input_fq)
     else
@@ -346,12 +141,12 @@ if [ $create_db == "False" ]; then
         exit 1    
     fi
 
-    # if [ $isfilter == 1 ]; then
-    #     isfilter_flag=1
-    # else
-    #     isfilter_flag=0
-    # fi
-    isfilter_flag=1
+    if [ $isfilter == 0 ] || [ $isfilter == "off" ]; then
+        isfilter_flag=0
+    else 
+        isfilter_flag=1
+    fi
+    # isfilter_flag=1
 
     echo "Parameters settings:"
     echo "  threads: $threads"
@@ -371,6 +166,7 @@ if [ $create_db == "False" ]; then
     echo "  input_fq: $input_fq"
     echo "  strain_level_flag: $strain_level_flag"
     echo "  species_level_flag: $species_level_flag"
+    echo "  isfilter_flag: $isfilter_flag"
     if [ $strain_level_flag == "False" ] && [ $species_level_flag == "False" ]; then
         echo "No species or strain option specified. Please set --species-level or --strain-level."
         exit 1
@@ -445,6 +241,9 @@ if [ $reconstruction_flag == "True" ]; then
     cd gfa_build
     if [ -d $tmp_dir/pggb_species ]; then
         count=$(ls $tmp_dir/pggb_species | wc -l)
+        echo "      PGGB species pangenome need to build: $count"
+        pggb_build_count=$(( $(find . -maxdepth 1 -type d | wc -l) - 1 ))
+        last_percentage=$((pggb_build_count / count))
         if [ $count -ne 0 ]; then
             ls $tmp_dir/pggb_species/*.txt | while read f; do
                 species_dir=$(basename $f)
@@ -468,6 +267,13 @@ if [ $reconstruction_flag == "True" ]; then
                     pggb -i $merge_file -o ${species_dir}/species${species_dir}_pggb -t $threads -p 90 -n $num -v
                 elif [ $verbose == "False" ]; then
                     pggb -i $merge_file -o ${species_dir}/species${species_dir}_pggb -t $threads -p 90 -n $num -v > /dev/null 2>&1
+                fi
+                pggb_build_count=$((pggb_build_count + 1))
+                current_percentage=$((pggb_build_count * 100 / count))
+                
+                if (( current_percentage >= last_percentage + 5 )); then
+                    echo "      PGGB species pangenome building percentage: $current_percentage%"
+                    last_percentage=$current_percentage
                 fi
             done
         fi
@@ -494,7 +300,29 @@ else
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Reference_pangenome.gfa exists. Skipping."
 fi
 
-if [ $create_db == "True" ];then
+if [ $create_db == "True" ] && [ $create_index == "False" ];then
+    cd ..
+    if [ $debug == "False" ]; then
+        rm -rf tmp
+    fi
+    exit 0
+fi
+
+if [ $create_index == "True" ]; then
+    echo "$(date "+%Y-%m-%d %H:%M:%S") - Construct index...."
+    if [ $short_read_best_alignment == "False" ] && [ ! -e $pantax_db/reference_pangenome.min ]; then
+        # # these commands all can show progress with option -p
+        $vg gbwt -g reference_pangenome.giraffe.gbz --gbz-format -G $pantax_db/reference_pangenome.gfa
+        $vg index -j reference_pangenome.dist reference_pangenome.giraffe.gbz -t $threads
+        $vg minimizer -d reference_pangenome.dist -o reference_pangenome.min reference_pangenome.giraffe.gbz
+    else
+        $vg autoindex -p reference_pangenome -w giraffe -g $pantax_db/reference_pangenome.gfa -t $threads
+    fi
+    mv reference_pangenome* $pantax_db
+    echo "$(date "+%Y-%m-%d %H:%M:%S") - Construct index.... done"
+fi
+
+if [ $create_index == "True" ];then
     cd ..
     if [ $debug == "False" ]; then
         rm -rf tmp
