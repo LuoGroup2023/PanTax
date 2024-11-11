@@ -11,27 +11,26 @@ function print_help() {
   echo "Date:   May 2024"
   echo ""
   echo "    General options:"
-  echo "        --create                          Create database only."
-  echo "        --index                           Create index only  (for short read)."
-  echo "        --vg FILE                         Path to vg executable file."
+  echo "        -f, --genomesInformation FILE:    A list of reference genomes in specified format (Mandatory)."
   echo "        -n, --next                        Keep the temporary folder for later use at the strain level." 
-  echo "        --debug                           Keep the temporary folder for any situation."
-  echo "        --sample                          Sampling nodes(500) are used for small model testing (set for codeocean)."
+  echo "        -t, --threads INT                 Number of processes to run in parallel(default: all available)."
   echo "        -v, --verbose                     Detailed database build log."
-  echo "        -t, --threads INT                 Number of processes to run in parallel(default: 64)."
+  echo "        --vg FILE                         Path to vg executable file."
+  echo "        --debug                           Keep the temporary folder for any situation."
   echo "        --help, -h                        Print this help message."
   echo "        --version                         Print the version info."
   echo "    Database creation:"
-  echo "        -f, --genomesInformation FILE:    A list of reference genomes in specified format (Mandatory)."
+  echo "        --create                          Create database only."
   echo "        -db NAME                          Name for pantax DB (default: pantax_db)."
-  echo "    Index construction:"
-  echo "        -s, --short-read                  Short read alignment."
+  echo "    Index construction(for short read):"
+  echo "        --index                           Create index only."
   echo "        --best                            Best autoindex(only used with -s)."
-  echo "        -l, --long-read                   Long read alignment."
   echo "        --fast                            Fast index(only used with -l)."
-  echo "    Read classification:"
+  echo "    Read alignment:"
   echo "        -r, --fastq-in FILE               Read and align FASTQ-format reads from FILE (two are allowed with -p)."
+  echo "        -s, --short-read                  Short read alignment."
   echo "        -p, --paired                      For paired-end alignment."
+  echo "        -l, --long-read                   Long read alignment."
   echo "    Abundacnce calculation:"
   echo "        --species-level                   Species abundance calulation."
   echo "        --strain-level                    Strain abundance calulation."
@@ -46,6 +45,8 @@ function print_help() {
   echo "        -S, --classified-out FILENAME     File for alignment output(prefix)."
   echo "        -R, --report FILENAME             File for read classification output(prefix)."
   echo "        -o, --ouput FILENAME              File for abundance output(prefix)."
+  echo "    Other:"
+  echo "        --sample                          Sampling nodes(500) are used for small model testing (set for codeocean)."
   echo ""
   exit 0
 }
@@ -54,19 +55,26 @@ timestamp=$(date "+%Y-%m-%d %H:%M:%S")
 echo "$timestamp - $0 $@"
 
 # set default value
+version="v1.1.0"
+# General
+genomes_info=""
+next_for_strain="False"
+threads=$(grep -c ^processor /proc/cpuinfo)
+verbose="False"
+vg=""
+debug="False"
+
+# Database creation
 pantax_db="pantax_db"
 create_db="False"
+
 create_index="False"
-next_for_strain="False"
-debug="False"
-verbose="False"
+short_read_best_alignment="False"
+long_read_fast_alignment="False"
+
 short_reads="False"
 long_reads="False"
 pair_short_read="False"
-short_read_best_alignment="False"
-long_read_fast_alignment="False"
-threads=64
-gurobi_threads=1
 
 species_level_flag="False"
 strain_level_flag="False"
@@ -78,10 +86,14 @@ unique_trio_nodes_count=0.45
 min_cov=0
 min_depth=0
 sample=0
+gurobi_threads=1
 
 wd=$(pwd)
+interleaved_short_read="False"
+input_fq=""
+input_fq1=""
+input_fq2=""
 pantax_report=pantax_report.tsv
-
 #Print help if no argument specified
 if [[ "$1" == "" ]]; then
   print_help
@@ -90,43 +102,64 @@ fi
 # get parameters
 while [[ "$1" != "" ]]; do
     case "$1" in
-    "--help" | "-h") print_help;;
-    "--version") echo "PanTax version v1.1.0"; exit 0;;
-    "--create") create_db="True"; shift 1;;
-    "--index") create_index="True"; shift 1;;
-    "--vg") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { vg="$2"; shift 2; } ;;
-    "-n" | "--next") next_for_strain="True"; shift 1;;
-    "--debug") debug="True"; shift 1;;
-    "--sample") sample=1; shift 1;;
-    "-v" | "--verbose") verbose="True"; shift 1 ;;
-    "-f" | "--genomesInformation") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { genomes_info="$2"; shift 2; } ;;
-    "-db") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pantax_db="$2"; shift 2; } ;;
-    "-s" | "--short-read") short_reads="True"; shift 1;;
-    "-l" | "--long-read") long_reads="True"; shift 1;;
-    "--best") short_read_best_alignment="True"; shift 1;;
-    "--fast") long_read_fast_alignment="True"; shift 1;;     
-    "-r" | "--fastq-in") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { input_fq="$2"; shift 2; } ;;
-    "-p" | "--paired") pair_short_read="True"; shift 1;;
-    "--strain-level") strain_level_flag="True"; shift 1;;
-    "--species-level") species_level_flag="True"; shift 1;;
-    "--filter") isfilter=$2; shift 2;;
-    "-a") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { species_abund_threshold="$2"; shift 2; } ;;
-    "-fr") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { unique_trio_nodes_fraction="$2"; shift 2; } ;;   
-    "-fc") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { unique_trio_nodes_count="$2"; shift 2; } ;;    
-    "--min_cov") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { min_cov="$2"; shift 2; } ;;
-    "--min_depth") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { min_depth="$2"; shift 2; } ;;
-    "-g" | "--save") save=1; shift 1;;                
-    "-S" | "--classified-out") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { read_aln="$2".gaf; shift 2; } ;;                                                                          
-    "-R" | "--report") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pantax_report="$2".tsv; shift 2; } ;;
-    "-o" | "--output") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pantax_output=$2; shift 2; } ;;
-    "-t" | "--threads") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { threads=$2; shift 2; } ;;
-    "-gt") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { gurobi_threads=$2; shift 2; } ;;                                                             
-    --) shift; break;;
-    *) echo "Error: invalid option \"$1\""; exit 1;;
+        "-f" | "--genomesInformation") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { genomes_info="$2"; shift 2; } ;;
+        "-n" | "--next") next_for_strain="True"; shift 1;;
+        "-t" | "--threads") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { threads=$2; shift 2; } ;;
+        "-v" | "--verbose") verbose="True"; shift 1 ;;
+        "--vg") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { vg="$2"; shift 2; } ;;
+        "--debug") debug="True"; shift 1;;
+        "--help" | "-h") print_help;;
+        "--version") echo $version; exit 0;;
+
+        "--create") create_db="True"; shift 1;;
+        "-db") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pantax_db="$2"; shift 2; } ;;
+
+        "--index") create_index="True"; shift 1;;
+        "--best") short_read_best_alignment="True"; shift 1;;
+        "--fast") long_read_fast_alignment="True"; shift 1;;  
+
+        "-s" | "--short-read") short_reads="True"; shift 1;;
+        "-p" | "--paired") pair_short_read="True"; shift 1;;
+        "-l" | "--long-read") long_reads="True"; shift 1;;   
+        "-r" | "--fastq-in")
+            [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; }
+            if [[ -z $input_fq ]] && [ $pair_short_read == "False" ]; then
+                input_fq=$2 
+            elif [[ $pair_short_read == "True" ]] && ( [[ -z $input_fq1 ]] || [[ -z $input_fq2 ]] ); then
+                if [ -z $input_fq1 ]; then
+                    input_fq1="$2"
+                elif [ -z $input_fq2 ]; then
+                    input_fq2="$2"
+                fi
+            else
+                echo "Error: Too many -r/--fastq-in arguments"
+                exit 1
+            fi
+            shift 2
+            ;;
+
+        "--strain-level") strain_level_flag="True"; shift 1;;
+        "--species-level") species_level_flag="True"; shift 1;;
+        "--filter") isfilter=$2; shift 2;;
+        "-a") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { species_abund_threshold="$2"; shift 2; } ;;
+        "-fr") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { unique_trio_nodes_fraction="$2"; shift 2; } ;;   
+        "-fc") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { unique_trio_nodes_count="$2"; shift 2; } ;;    
+        "--min_cov") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { min_cov="$2"; shift 2; } ;;
+        "--min_depth") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { min_depth="$2"; shift 2; } ;;
+        "-g" | "--save") save=1; shift 1;;                
+        "-S" | "--classified-out") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { read_aln="$2".gaf; shift 2; } ;;                                                                          
+        "-R" | "--report") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pantax_report="$2".tsv; shift 2; } ;;
+        "-o" | "--output") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pantax_output=$2; shift 2; } ;;
+        "-gt") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { gurobi_threads=$2; shift 2; } ;;                                                             
+
+        "--sample") sample=1; shift 1;;
+
+        --) shift; break;;
+        *) echo "Error: invalid option \"$1\""; exit 1;;
     esac
 done
 
-if [ $genomes_info ] && [ -f $genomes_info ]; then
+if [ ! -z $genomes_info ] && [ -f $genomes_info ]; then
     genomes_info=$(readlink -f $genomes_info)
 else
     echo "genomes information file does not exist!"
@@ -134,8 +167,12 @@ else
 fi
 
 if [ $create_db == "False" ] && [ $create_index == "False" ]; then
-    if [ $input_fq ] && [ -f $input_fq ]; then
+    if [ ! -z $input_fq ] && [ -f $input_fq ]; then
         input_fq=$(readlink -f $input_fq)
+    elif [ ! -z $input_fq1 ] && [ -f $input_fq1 ] && [ ! -z $input_fq2 ] && [ -f $input_fq2 ]; then
+        input_fq1=$(readlink -f $input_fq1)
+        input_fq2=$(readlink -f $input_fq2)
+        interleaved_short_read="True"
     else
         echo "fastq file does not exist!"
         exit 1    
@@ -146,9 +183,8 @@ if [ $create_db == "False" ] && [ $create_index == "False" ]; then
     else 
         isfilter_flag=1
     fi
-    # isfilter_flag=1
 
-    echo "Parameters settings:"
+    echo "Main parameters settings:"
     echo "  threads: $threads"
     echo "Database creation:"
     echo "  genomes_info: $genomes_info"
@@ -164,9 +200,10 @@ if [ $create_db == "False" ] && [ $create_index == "False" ]; then
     fi
     echo "Read classification:"
     echo "  input_fq: $input_fq"
+    echo "  input_fq1: $input_fq1"
+    echo "  input_fq2: $input_fq2"
     echo "  strain_level_flag: $strain_level_flag"
     echo "  species_level_flag: $species_level_flag"
-    echo "  isfilter_flag: $isfilter_flag"
     if [ $strain_level_flag == "False" ] && [ $species_level_flag == "False" ]; then
         echo "No species or strain option specified. Please set --species-level or --strain-level."
         exit 1
@@ -190,10 +227,11 @@ else
     tools_dir=$(dirname $script_dir)/tools
     fastix=$tools_dir/fastix/bin/fastix
 fi
-if [ $vg ]; then
+if [ ! -z $vg ] && [ -f $vg ] ; then
     :
-else
+elif [ -z $vg ]; then
     vg=$tools_dir/vg
+    echo $vg
 fi
 
 # set pantax_db and tmp directory
@@ -351,8 +389,10 @@ if [[ ( $species_level_flag == "True" || $strain_level_flag == "True" ) && ( $sh
     echo "$(date "+%Y-%m-%d %H:%M:%S") - vg giraffe mapping..."
     # $vg giraffe -Z reference_pangenome.giraffe.gbz -m reference_pangenome.min -d reference_pangenome.dist -i -f $input_fq -t $threads --named-coordinates > gfa_mapped.gam
     # $vg convert -a gfa_mapped.gam -j > gfa_mapped.json
-    if [ $pair_short_read == "True" ]; then
+    if [ $pair_short_read == "True" ] && [ $interleaved_short_read == "False" ]; then
         $vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -i -f $input_fq -t $threads --named-coordinates -o gaf > gfa_mapped.gaf
+    elif [ $pair_short_read == "True" ] && [ $interleaved_short_read == "True" ]; then
+        $vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -f $input_fq1 -f $input_fq2 -t $threads --named-coordinates -o gaf > gfa_mapped.gaf
     elif [ $pair_short_read == "False" ]; then
         $vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -f $input_fq -t $threads --named-coordinates -o gaf > gfa_mapped.gaf
     fi
