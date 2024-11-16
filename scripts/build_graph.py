@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # for every species only has one strain, merge all strains to a big gfa file and node length chopped by ourselves.
-import os, argparse
+import os, argparse, sys
 from typing import Dict, List
 from staticsData import read_data
 import concurrent.futures
@@ -8,8 +8,10 @@ import concurrent.futures
 usage = "Build variation graph for the species only one genomes"
 
 class BuildGraph:
-    def __init__(self, species_eq1_genomes_info: str):
+    def __init__(self, species_eq1_genomes_info: str, wd: str):
         self.species_eq1_genomes_info = species_eq1_genomes_info
+        self.wd = wd
+        self.gfa_build_done = []
 
     def read_fasta(self, genome_path: str) -> Dict[str, str]:
         """
@@ -31,8 +33,7 @@ class BuildGraph:
         Cut the genome into blocks of specified length, which serve as nodes. This GFA graph is like a chain.
         Node 1 -> node2 -> ... -> node n
         """
-        wd = "gfa_build"
-        if not os.path.exists(f"{wd}/{species_taxid}.gfa"):        
+        if not os.path.exists(f"{self.wd}/{species_taxid}.gfa"):        
             # genome_path = "/home/work/wenhai/metaprofiling/bacteria_refgenome_NCBIdata/complete_genome/complete_genome_without_plasmid/GCF_000009485.1_ASM948v1_genomic.fna"
             # genome_path = "/home/work/wenhai/metaprofiling/bacteria_refgenome_NCBIdata/complete_genome/strain-level2/249567/GCF_019880305.1_ASM1988030v1_genomic.fna"
             # genome_path = "249567/GCF_019880305.1_ASM1988030v1_genomic.fna"
@@ -62,11 +63,12 @@ class BuildGraph:
             if len(S) != len(L) + len(genome_seq) and len(W) != len(genome_seqs):
                 print("L lines or W lines error")
             
-            with open(f"{wd}/{species_taxid}_merged.gfa", "w") as f:
+            with open(f"{self.wd}/{species_taxid}.gfa", "w") as f:
                 f.write("H\tVN:Z:1.1\n")
                 f.write("".join(S))
                 f.write("".join(L))
                 f.write("".join(W))
+        self.gfa_build_done.append(f"{self.wd}/{species_taxid}.gfa")
 
     def parallel_build_gfa(self) -> None:
         with open(self.species_eq1_genomes_info, "r") as f:
@@ -81,10 +83,18 @@ class BuildGraph:
             futures = {key: executor.submit(self.single_genome_gfa, key, value) for key, value in species_to_genome.items()}
             concurrent.futures.wait(futures.values())
 
+    def write_gfa_building_done(self):
+        with open(f"{self.wd}/gfa_build_done.txt", "w") as f:
+            f.write("\n".join(self.gfa_build_done) + "\n")
 
-if __name__=="__main__":
+def main():
     parser = argparse.ArgumentParser(prog="python build_graph.py", description=usage)
     parser.add_argument("species_eq1_genomes_info", type=str, help="Species eq1 genomes information file. Format: species_taxid\\tID\\n")
+    parser.add_argument("wd", type=str, help="Work directory")
     args = parser.parse_args()
-    build_graph=BuildGraph(args.species_eq1_genomes_info)
+    build_graph=BuildGraph(args.species_eq1_genomes_info, args.wd)
     build_graph.parallel_build_gfa()
+    build_graph.write_gfa_building_done()
+
+if __name__=="__main__":
+    sys.exit(main())

@@ -11,23 +11,27 @@ function print_help() {
   echo "Date:   May 2024"
   echo ""
   echo "    General options:"
-  echo "        -f, --genomesInformation FILE:    A list of reference genomes in specified format (Mandatory)."
-  echo "        -n, --next                        Keep the temporary folder for later use at the strain level." 
+  echo "        -f, --genomesInformation str:     A list of reference genomes in specified format (Mandatory)."
+  echo "        -db str                           Name for pantax DB (default: pantax_db)."
+  echo "        -T str                            Temporary directory (default: pantax_db_tmp)."
+  echo "        -n, --next                        Keep the temporary folder for later use at the strain level (resume)." 
   echo "        -t, --threads INT                 Number of processes to run in parallel(default: all available)."
   echo "        -v, --verbose                     Detailed database build log."
-  echo "        --vg FILE                         Path to vg executable file."
+  echo "        --vg str                          Path to vg executable file."
   echo "        --debug                           Keep the temporary folder for any situation."
   echo "        --help, -h                        Print this help message."
   echo "        --version                         Print the version info."
   echo "    Database creation:"
   echo "        --create                          Create database only."
-  echo "        -db NAME                          Name for pantax DB (default: pantax_db)."
+  echo "        --force                           Force to rebuild pangenome."
+  echo "        -e                                Path to pangenome building tool executable file (default: pggb)." 
+#   echo "        --parallel str                    Multiple species at once (default: True/on)."
   echo "    Index construction(for short read):"
   echo "        --index                           Create index only."
   echo "        --best                            Best autoindex(only used with -s)."
   echo "        --fast                            Fast index(only used with -l)."
   echo "    Read alignment:"
-  echo "        -r, --fastq-in FILE               Read and align FASTQ-format reads from FILE (two are allowed with -p)."
+  echo "        -r, --fastq-in str                Read and align FASTQ-format reads from FILE (two are allowed with -p)."
   echo "        -s, --short-read                  Short read alignment."
   echo "        -p, --paired                      For paired-end alignment."
   echo "        -l, --long-read                   Long read alignment."
@@ -37,16 +41,16 @@ function print_help() {
   echo "        -a float                          Species with more than abundance threshold used for strain abundance calulation.(default: 0.0001)."
   echo "        -fr float                         Unique trio nodes fraction(default: 0.3)."
   echo "        -fc float                         Unique trio nodes mean count fraction(default: 0.45)."
-  echo "        --filter                          MAPQ-based filter."
+#   echo "        --filter str                      MAPQ-based filter (default: True/on)."
   echo "        --min_cov int                     Minimum coverage required per strain(default: 0)."
   echo "        --min_depth int                   Graph nodes with sequence depth less than <min_depth>(default: 0)."
   echo "        -gt int                           Gurobi threads(default: 1)."
   echo "        -g, --save                        Save species graph information."
-  echo "        -S, --classified-out FILENAME     File for alignment output(prefix)."
-  echo "        -R, --report FILENAME             File for read classification output(prefix)."
-  echo "        -o, --ouput FILENAME              File for abundance output(prefix)."
-  echo "    Other:"
-  echo "        --sample                          Sampling nodes(500) are used for small model testing (set for codeocean)."
+  echo "        -S, --classified-out str          File for alignment output(prefix)."
+  echo "        -R, --report str                  File for read classification output(prefix)."
+  echo "        -o, --ouput str                   File for abundance output(prefix)."
+#   echo "    Other:"
+#   echo "        --sample                          Sampling nodes(500) are used for small model testing (set for codeocean)."
   echo ""
   exit 0
 }
@@ -58,6 +62,8 @@ echo "$timestamp - $0 $@"
 version="v1.1.0"
 # General
 genomes_info=""
+pantax_db="pantax_db"
+tmp_dir=""
 next_for_strain="False"
 threads=$(grep -c ^processor /proc/cpuinfo)
 verbose="False"
@@ -65,8 +71,10 @@ vg=""
 debug="False"
 
 # Database creation
-pantax_db="pantax_db"
 create_db="False"
+force="False"
+pangenome_building_tool="pggb"
+parallel_build="True"
 
 create_index="False"
 short_read_best_alignment="False"
@@ -103,6 +111,8 @@ fi
 while [[ "$1" != "" ]]; do
     case "$1" in
         "-f" | "--genomesInformation") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { genomes_info="$2"; shift 2; } ;;
+        "-db") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pantax_db="$2"; shift 2; } ;;
+        "-T") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { tmp_dir="$2"; shift 2; } ;;
         "-n" | "--next") next_for_strain="True"; shift 1;;
         "-t" | "--threads") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { threads=$2; shift 2; } ;;
         "-v" | "--verbose") verbose="True"; shift 1 ;;
@@ -112,7 +122,9 @@ while [[ "$1" != "" ]]; do
         "--version") echo $version; exit 0;;
 
         "--create") create_db="True"; shift 1;;
-        "-db") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pantax_db="$2"; shift 2; } ;;
+        "--force") force="True"; shift 1;;
+        "-e") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pangenome_building_tool="$2"; shift 2; } ;;
+        "--parallel") parallel_build=$2; shift 2;;
 
         "--index") create_index="True"; shift 1;;
         "--best") short_read_best_alignment="True"; shift 1;;
@@ -159,11 +171,29 @@ while [[ "$1" != "" ]]; do
     esac
 done
 
+if [ ! -d $pantax_db ]; then
+    mkdir $pantax_db
+elif [ -d $pantax_db ] && [ $force == "True" ]; then
+    rm -rf $pantax_db
+    mkdir $pantax_db
+fi
+pantax_db=$(readlink -f $pantax_db)
+
 if [ ! -z $genomes_info ] && [ -f $genomes_info ]; then
     genomes_info=$(readlink -f $genomes_info)
+elif [ -z $genomes_info ] && [ -f $pantax_db/genomes_info.txt ]; then
+    genomes_info=$(readlink -f $pantax_db/genomes_info.txt)
+elif [ $create_db == "False" ] && [ $create_index == "True" ]; then
+    :
 else
     echo "genomes information file does not exist!"
     exit 1
+fi
+
+if [ $parallel_build == "False" ] || [ $parallel_build == "false" ] || [ $parallel_build == "off" ]; then
+    parallel_build="False"
+else 
+    parallel_build="True"
 fi
 
 if [ $create_db == "False" ] && [ $create_index == "False" ]; then
@@ -172,7 +202,12 @@ if [ $create_db == "False" ] && [ $create_index == "False" ]; then
     elif [ ! -z $input_fq1 ] && [ -f $input_fq1 ] && [ ! -z $input_fq2 ] && [ -f $input_fq2 ]; then
         input_fq1=$(readlink -f $input_fq1)
         input_fq2=$(readlink -f $input_fq2)
-        interleaved_short_read="True"
+        interleaved_short_read="False"
+    elif [ ! -z $input_fq1 ] && [ -f $input_fq1 ] && [ -z $input_fq2 ]; then
+        input_fq1=$(readlink -f $input_fq1)
+        input_fq=$input_fq1
+        input_fq1=""
+        interleaved_short_read="True"        
     else
         echo "fastq file does not exist!"
         exit 1    
@@ -227,29 +262,27 @@ else
     tools_dir=$(dirname $script_dir)/tools
     fastix=$tools_dir/fastix/bin/fastix
 fi
-if [ ! -z $vg ] && [ -f $vg ] ; then
+if [ ! -z $vg ] && [ -f $vg ]; then
     :
 elif [ -z $vg ]; then
     vg=$tools_dir/vg
-    echo $vg
 fi
 
-# set pantax_db and tmp directory
-if [ ! -d $pantax_db ]; then
-    mkdir -p $pantax_db
-# else
-#     rm -rf $pantax_db
-#     mkdir -p $pantax_db
+# tmp
+if [ -z $tmp_dir ]; then
+    tmp_dir=$(basename $pantax_db)_tmp
+    tmp_dir=$(readlink -f $tmp_dir)
+elif [ ! -z $tmp_dir ] && [ -d $tmp_dir ]; then
+    tmp_dir=$tmp_dir/${pantax_db}_tmp
+elif [ ! -z $tmp_dir ] && [ ! -d $tmp_dir ]; then
+    :
 fi
-pantax_db=$(readlink -f $pantax_db)
-# cd $pantax_db
-if [ $next_for_strain == "False" ] && [ -d tmp ] && [ $debug == "False" ]; then
-    rm -rf tmp
+if [ $next_for_strain == "False" ] && [ $debug == "False" ]; then
+    rm -rf $tmp_dir
 fi
-
-mkdir -p tmp
-tmp_dir=$(readlink -f tmp)
+mkdir -p $tmp_dir
 cd $tmp_dir
+
 cleanup() {
     echo "$(date "+%Y-%m-%d %H:%M:%S") - PanTax encountered an exception while running and has deleted the tmp folder."
     echo "If you need to start checking not to delete the tmp directory, please add the --debug option."
@@ -261,6 +294,8 @@ fi
 
 # ---------------------------- Building reference pangenome ----------------------------
 if [ ! -f $pantax_db/reference_pangenome.gfa ]; then 
+    # backup genomes_info for each custom database
+    cp -f $genomes_info $pantax_db/genomes_info.txt
     new_pantax_db=$pantax_db
     pantax_db=$tmp_dir
     reconstruction_flag="True"
@@ -268,70 +303,36 @@ else
     reconstruction_flag="False"
 fi
 
+if [ ! -f $pantax_db/reference_pangenome.gfa ] && [ $create_index == "True" ]; then
+    echo "$pantax_db/reference_pangenome.gfa does not exist."
+fi
+
 if [ $reconstruction_flag == "True" ]; then 
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Building reference pangenome ..."
-    # Prepare genomes information. Return pggb_species directory and species_eq1_genomes.txt
-    # Species(in pggb_species directory) more than 2 genomes will be used to build pangenome firstly.
-    python $script_dir/prepare_building.py $genomes_info $wd
+    # Prepare genomes information. Return species_pangenome directory and species_eq1_genomes.txt
+    # Species(in species_pangenome directory) more than 2 genomes will be used to build pangenome firstly.
+    python $script_dir/prepare_building.py $genomes_info $wd $tmp_dir
+    gfa_build_dir=$tmp_dir/gfa_build
+    # first step: build pangenome for the species with more than two genomes
+    python $script_dir/task_scheduling.py $gfa_build_dir $tmp_dir/species_pangenome $fastix $vg -t $threads -v $verbose -f $force -e $pangenome_building_tool -d $debug -p $parallel_build
 
-    # build pangenome with pggb
-    mkdir -p gfa_build
-    cd gfa_build
-    if [ -d $tmp_dir/pggb_species ]; then
-        count=$(ls $tmp_dir/pggb_species | wc -l)
-        echo "      PGGB species pangenome need to build: $count"
-        pggb_build_count=$(( $(find . -maxdepth 1 -type d | wc -l) - 1 ))
-        last_percentage=$((pggb_build_count / count))
-        if [ $count -ne 0 ]; then
-            ls $tmp_dir/pggb_species/*.txt | while read f; do
-                species_dir=$(basename $f)
-                species_dir=${species_dir%.txt}
-                if [ ! -d $species_dir ]; then
-                    mkdir $species_dir
-                else
-                    continue
-                fi
-                while IFS= read genome; do
-                    sample_genome=$(basename $genome | cut -f 1,2 -d '_')
-                    # echo $genome
-                    $fastix $genome -p "${sample_genome}#1#" | bgzip -@ $threads -c > ${species_dir}/${sample_genome}.fa.gz
-                done < $f
-                genomes_list=$(find $species_dir -name "*.fa.gz" -exec echo -n "{} " \;)
-                num=$(ls $species_dir/*.fa.gz | wc -l)
-                merge_file=${species_dir}/${species_dir}_merged.fa.gz
-                zcat $genomes_list | bgzip -c -@ $threads > $merge_file
-                samtools faidx $merge_file
-                if [ $verbose == "True" ]; then
-                    /usr/bin/time -v -o $species_dir/pggb_run_time.log pggb -i $merge_file -o ${species_dir}/species${species_dir}_pggb -t $threads -p 90 -n $num -v
-                elif [ $verbose == "False" ]; then
-                    pggb -i $merge_file -o ${species_dir}/species${species_dir}_pggb -t $threads -p 90 -n $num -v > /dev/null 2>&1
-                fi
-                pggb_build_count=$((pggb_build_count + 1))
-                current_percentage=$((pggb_build_count * 100 / count))
-                
-                if (( current_percentage >= last_percentage + 5 )); then
-                    echo "      PGGB species pangenome building percentage: $current_percentage%"
-                    last_percentage=$current_percentage
-                fi
-            done
-        fi
+    # second step: build variation graph for the species with one genomes
+    python $script_dir/build_graph.py species_eq1_genomes.txt $gfa_build_dir
+    if [ $debug == "False" ]; then
+        rm -rf $tmp_dir/species_pangenome $tmp_dir/species_eq1_genomes.txt
     fi
-    cd ..
-
-    # build variation graph for the species with one genomes
-    python $script_dir/build_graph.py species_eq1_genomes.txt
-    # rm -rf pggb_species species_eq1_genomes.txt
-    # find gfa_build -type f -name "*.gfa" -exec bash -c 'input={}; name=$(basename $input); output=${name%%.*}.vg; vg convert -g $input -p > gfa_build/$output' \;
-    find gfa_build -type f -name "*.gfa" -exec bash -c 'input="$1"; vg="$2"; name=$(basename "$input"); output=${name%%.*}.vg; "$vg" convert -g "$input" -p > gfa_build/"$output"' _ {} "$vg" \;
-    vg_files=$(ls gfa_build/*.vg)
+    cat $gfa_build_dir/gfa_build_done.txt | xargs -I {} -P $(($threads/2)) bash -c 'vg=$1; gfa_build_dir=$2; input=$3; name=$(basename $input .gfa); output=$gfa_build_dir/$name.vg; $vg convert -g $input -p > $output' _ $vg $gfa_build_dir {}
+    vg_files=$(ls $gfa_build_dir/*.vg)
     $vg combine -p $vg_files > reference_pangenome.vg
     $vg convert -f reference_pangenome.vg > reference_pangenome.gfa
-    rm reference_pangenome.vg
+    if [ $debug == "False" ]; then
+        rm reference_pangenome.vg $vg_files
+    fi
     python $script_dir/otu_range.py reference_pangenome.gfa $genomes_info --species-level
     # extract gfa files for strain abundance computing
-    mkdir -p species_gfa
-    find gfa_build -name "*gfa" -exec bash -c 'input={}; name=$(basename $input); output=${name%%_merge*}.gfa; mv $input species_gfa/$output' \;
-    mv species_gfa reference_pangenome* species_range.txt $new_pantax_db
+    mkdir -p $tmp_dir/species_gfa
+    find $gfa_build_dir -name "*gfa" -exec bash -c 'input=$1; tmp_dir=$2; name=$(basename $input); mv $input $tmp_dir/species_gfa/' _ {} $tmp_dir \;
+    mv $tmp_dir/species_gfa reference_pangenome* species_range.txt $new_pantax_db
     pantax_db=$new_pantax_db
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Building reference pangenome completely."
 else
@@ -341,14 +342,14 @@ fi
 if [ $create_db == "True" ] && [ $create_index == "False" ];then
     cd ..
     if [ $debug == "False" ]; then
-        rm -rf tmp
+        rm -rf $tmp_dir
     fi
     exit 0
 fi
 
-if [ $create_index == "True" ]; then
+if [ $create_index == "True" ] && [ ! -e $pantax_db/reference_pangenome.min ] && [ ! -e $new_pantax_db/reference_pangenome.min ]; then
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Construct index...."
-    if [ $short_read_best_alignment == "False" ] && [ ! -e $pantax_db/reference_pangenome.min ]; then
+    if [ $short_read_best_alignment == "False" ]; then
         # # these commands all can show progress with option -p
         $vg gbwt -g reference_pangenome.giraffe.gbz --gbz-format -G $pantax_db/reference_pangenome.gfa
         $vg index -j reference_pangenome.dist reference_pangenome.giraffe.gbz -t $threads
@@ -358,12 +359,14 @@ if [ $create_index == "True" ]; then
     fi
     mv reference_pangenome* $pantax_db    
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Construct index.... done"
+else
+    echo "$(date "+%Y-%m-%d %H:%M:%S") - Giraffe index exists. Skipping." 
 fi
 
 if [ $create_index == "True" ];then
     cd ..
     if [ $debug == "False" ]; then
-        rm -rf tmp
+        rm -rf $tmp_dir
     fi
     exit 0
 fi
@@ -389,9 +392,9 @@ if [[ ( $species_level_flag == "True" || $strain_level_flag == "True" ) && ( $sh
     echo "$(date "+%Y-%m-%d %H:%M:%S") - vg giraffe mapping..."
     # $vg giraffe -Z reference_pangenome.giraffe.gbz -m reference_pangenome.min -d reference_pangenome.dist -i -f $input_fq -t $threads --named-coordinates > gfa_mapped.gam
     # $vg convert -a gfa_mapped.gam -j > gfa_mapped.json
-    if [ $pair_short_read == "True" ] && [ $interleaved_short_read == "False" ]; then
+    if [ $pair_short_read == "True" ] && [ $interleaved_short_read == "True" ]; then
         $vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -i -f $input_fq -t $threads --named-coordinates -o gaf > gfa_mapped.gaf
-    elif [ $pair_short_read == "True" ] && [ $interleaved_short_read == "True" ]; then
+    elif [ $pair_short_read == "True" ] && [ $interleaved_short_read == "False" ]; then
         $vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -f $input_fq1 -f $input_fq2 -t $threads --named-coordinates -o gaf > gfa_mapped.gaf
     elif [ $pair_short_read == "False" ]; then
         $vg giraffe -Z $pantax_db/reference_pangenome.giraffe.gbz -m $pantax_db/reference_pangenome.min -d $pantax_db/reference_pangenome.dist -f $input_fq -t $threads --named-coordinates -o gaf > gfa_mapped.gaf
@@ -469,7 +472,7 @@ if [[ ( $strain_level_flag == "True" && $next_for_strain == "True" ) || ( $speci
     if [ $debug == "False" ]; then
         mv $tmp_dir/reads_classification.csv $wd
         mv $wd/reads_classification.csv $pantax_report
-        rm -rf tmp
+        rm -rf $tmp_dir
     fi
 fi
 echo "$(date "+%Y-%m-%d %H:%M:%S") - PanTax Done."
