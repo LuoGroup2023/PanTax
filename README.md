@@ -198,7 +198,7 @@ During the "Building reference pangenome" step, there were no errors reported by
 conda install pantax -c bioconda -c conda-forge -c gurobi
 ```
 
-## Citing PanTax
+## Citation
 @article {Zhang2024.11.15.623887,
 	author = {Zhang, Wenhai and Liu, Yuansheng and Xu, Jialu and Chen, Enlian and Schonhuth, Alexander and Luo, Xiao},
 	title = {PanTax: Strain-level taxonomic classification of metagenomic data using pangenome graphs},
