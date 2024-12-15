@@ -160,13 +160,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="python otu_range.py", description=usage)
     parser.add_argument("reference_pangenome_gfa", type=str, help="Reference pangenome GFA file")
     parser.add_argument("genomes_info", type=str, help="Genomes information file")
+    parser.add_argument("pangenome_ge2", type=str, help="Pangenome ge2")
+    parser.add_argument("pangenome_eq1", type=str, help="Pangenome eq1")
     parser.add_argument("--species-level", dest="species_flag", action="store_true", help="OTU(species) level range. on(1)/off(0)")
     parser.add_argument("--strain-level", dest="strain_flag", action="store_true", help="OTU(species) level range. on(1)/off(0)")
     args = parser.parse_args()
-    print("\nProgram settings:\n")
-    for arg in vars(args):
-        print(arg, "=", getattr(args, arg))
-    print()
+    # print("\nProgram settings:\n")
+    # for arg in vars(args):
+    #     print(arg, "=", getattr(args, arg))
+    # print()
     extract_hap_paths_file = "extract_hap_paths.gfa"    
     otu_range_processor = OtuRangeProcessor(args.reference_pangenome_gfa, args.genomes_info, extract_hap_paths_file)
     otu_range_processor.extract_hap_paths()
@@ -174,9 +176,21 @@ if __name__ == "__main__":
         species_to_genomes = otu_range_processor.get_species_to_genomes_info()
         otu_range_processor.OTU_to_hap(species_to_genomes)
         result_dict = otu_range_processor.parallel(flag="species")
+        pangenome_ge2 = set(pd.read_csv(args.pangenome_ge2, header=None, dtype=object).iloc[:,0].tolist())
+        try:
+            pangenome_eq1 = set(pd.read_csv(args.pangenome_eq1, header=None, dtype=object).iloc[:, 0].tolist())
+        except pd.errors.EmptyDataError:
+            # print(f"Warning: The file {args.pangenome_eq1} is empty.")
+            pangenome_eq1 = set()
         with open("species_range.txt", "w") as f:
             for key, value in result_dict.items():
-                f.write(f"{key}\t{value[0]}\t{value[1]}\n")
+                if key in pangenome_ge2:
+                    flag = 1
+                elif key in pangenome_eq1:
+                    flag = 0
+                else:
+                    print(key)
+                f.write(f"{key}\t{value[0]}\t{value[1]}\t{flag}\n")
     if args.strain_flag:
         strain_to_genomes = otu_range_processor.get_strain_to_genomes_info()
         otu_range_processor.OTU_to_hap(strain_to_genomes)

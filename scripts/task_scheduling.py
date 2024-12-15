@@ -5,6 +5,9 @@ import time, asyncio
 from toolkits import Logger, delete_directory_contents, is_file_non_empty
 from pathlib import Path
 import pandas as pd
+
+script_path = Path(__file__).resolve()
+script_dir = script_path.parent 
 usage = "Task scheduling strategy for pangenome construction."
 """
 PGGB building genome time test: 8 threads-10 min, 16 threads-5 min, 32 threads-5 min, 64 threads-5 min for 10 genomes
@@ -93,6 +96,11 @@ class TaskScheduling:
         if used_threads < self.threads:
             self.fold = self.threads / used_threads
 
+        if self.save.lower() == "true":
+            self.save = True
+        else:
+            self.save = False
+
         if not self.sleep:
             self.sleep = 30
 
@@ -175,6 +183,9 @@ class TaskScheduling:
                     cmd.append(cmd5_3)
             cmd6 = f"{self.vg} convert -g {self.wd}/{species}/species{species}_pangenome_building/*gfa -p -t {threads} > {self.wd}/{species}.vg; mv {self.wd}/{species}/species{species}_pangenome_building/*gfa {self.wd}/{species}.gfa"
             cmd.append(cmd6)
+            if self.save:
+                cmd_tmp = f"python {script_dir}/get_h5_from_gfa.py {self.wd}/{species}.gfa {self.wd}/{species}.h5; rm {self.wd}/{species}.gfa"
+                cmd.append(cmd_tmp)
             if not self.debug:
                 cmd7 = f"rm -rf {self.wd}/{species}"
                 cmd.append(cmd7)
@@ -246,7 +257,8 @@ class TaskScheduling:
                     result = task.result()  # Get the result of the task
                     result_gfa = Path(self.wd) / f"{result}.gfa"
                     result_vg = Path(self.wd) / f"{result}.vg"
-                    if not (is_file_non_empty(result_gfa) and is_file_non_empty(result_vg)):
+                    result_h5 = Path(self.wd) / f"{result}.h5"
+                    if not ((is_file_non_empty(result_gfa) or is_file_non_empty(result_h5)) and is_file_non_empty(result_vg)):
                         raise IOError(f"{result} gfa or vg files are either missing or empty.")
                     self.finished_pangenome_num += 1
                     current_percentage = self.finished_pangenome_num * 100 / self.pangenomes_need_to_build
@@ -390,6 +402,7 @@ def main():
     parser.add_argument("-e", "--pangenome_building_exe", type=str, default="pggb", help="Pangenome building executable file(PGGB, Minigraph-Cactus).")
     parser.add_argument("-r", "--reference", type=str, help="Reference genomes for each species(Minigraph-Cactus need).")
     parser.add_argument("-p", "--parallel", dest="parallel", type=str, default="True", help="Parallel task.")
+    parser.add_argument("-g", "--save", dest="save", type=str, default="False", help="Save GFA file information to h5 file.")
     parser.add_argument("-s", "--sleep", type=int, help="Parallel loop sleep time.")
     parser.add_argument("-t", "--threads", dest="threads", type=int, required=True, help="Max threads.")
     parser.add_argument("-f", "--force", dest="force", type=str, default="False", help="Force all to rebuild.")

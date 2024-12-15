@@ -72,8 +72,8 @@ class ReadClassification:
         merge = pd.merge(df1, df2, on="species_index", how="left")
         merge = merge.drop(columns=["species_index", "read_nodes_range"])
         merge = merge.reindex(columns=["read_name", "mapq", "species", "read_len"])
-        merge.to_csv("reads_classification.csv", index=False, header=False, sep="\t", quoting=0)
-# awk -F '\t' '{print $3}' reads_classification.csv | sort | uniq -c | sort -nr > species_match.txt
+        merge.to_csv("reads_classification.tsv", index=False, header=False, sep="\t", quoting=0)
+# awk -F '\t' '{print $3}' reads_classification.tsv | sort | uniq -c | sort -nr > species_match.txt
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="python read_classification.py")

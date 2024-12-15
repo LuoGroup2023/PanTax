@@ -1,4 +1,7 @@
 scripts/gaf_filter2.py
+scripts/aln_json_process.py
+scripts/mark_pangenome_eq1.py
+scripts/strain_abundance_cal_ori.py
 scripts/strain_abundance_cal2.py
 scripts/__pycache__/
 tools/gurobipy-11.0.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl

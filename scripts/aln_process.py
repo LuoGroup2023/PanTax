@@ -31,16 +31,26 @@ def read_gaf(read_cls_file: str, gaf_file: str) -> Dict[str, List[List[str]]]:
             read_group_data[species_taxid] = []    
     reads_aln_info: Dict[str, List[str]] = {} # key = read_id, value = [read_id, read_path, read_path_len, read_start, read_end]
     # first method: line by line
+    dup_flag = False
     with open(gaf_file, "r") as f:
         for line in f:
             tokens = line.strip().split("\t")
             if tokens[8] != "*" and tokens[9] != "*":
-                reads_aln_info[tokens[0]] = [tokens[0]] + tokens[5:9] #[read_id, read_path, read_path_len, read_start, read_end]
+                if tokens[0] in reads_aln_info:
+                    read_id = tokens[0] + "_2"
+                    reads_aln_info[read_id] = [tokens[0]] + tokens[5:9]
+                    dup_flag = True
+                else:    
+                    reads_aln_info[tokens[0]] = [tokens[0]] + tokens[5:9] #[read_id, read_path, read_path_len, read_start, read_end]
     for read_id in read_cls["read_id"].tolist():
         species_taxid = read_id2species_taxids[read_id]
         try:
             read_info = reads_aln_info[read_id]
             read_group_data[species_taxid].append(read_info)
+            if dup_flag:
+                second_read_id = read_id + "_2"
+                read_info = reads_aln_info.get(second_read_id, None)
+                if read_info: read_group_data[species_taxid].append(read_info)
         except:
             print(f"{read_id} does not exist in GAF file.")
             continue 
