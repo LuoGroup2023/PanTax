@@ -40,6 +40,9 @@ def main():
     parser.add_argument("-m", "--mode", dest="mode", type=str, default="all", help="Select output pangenome result.")
     parser.add_argument("-p", "--parallel", dest="parallel", type=str, default="true", help="Whether parallel POA.")
     parser.add_argument("-ds", "--designated_species", dest="designated_species", type=str, default=None, help="Only return designated species result.")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
 
     print("\nProgram settings:\n")

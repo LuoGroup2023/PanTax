@@ -20,6 +20,9 @@ def main():
     parser.add_argument("-f", "--gtdb", dest="gtdb_metadata", type=str, help="GTDB metadata file. Specify this file will use GTDB taxonomy.")
     parser.add_argument("-t", "--threads", dest="threads", default=64, type=int, help="Number of threads.")
     parser.add_argument("--remove", dest="remove", action="store_true", help="Whether to remove plasmid.")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
     print("\nProgram settings:\n")
     for arg in vars(args):

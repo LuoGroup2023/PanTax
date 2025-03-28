@@ -1,4 +1,4 @@
-
+#!/usr/bin/env python3
 
 
 import sys,argparse
@@ -14,11 +14,14 @@ usage = """
 
 def main():
     parser = argparse.ArgumentParser(prog="python get_rep_cluster_genomes_info.py", usage=usage)
-    parser.add_argument("-h", "--hcls_file", dest="hcls_file", type=str, help="Hierarchical clustering result file.")
+    parser.add_argument("-cls", "--hcls_file", dest="hcls_file", type=str, help="Hierarchical clustering result file.")
     parser.add_argument("-f", "--genomes_info", dest="genomes_info", type=str, help="Genomes information file.")
     parser.add_argument("-i", "--strain_abund", dest="strain_abund", type=str, help="Strain abundance file.")
     parser.add_argument("--gtdb", dest="gtdb", action="store_true", help="GTDB genome accession.")
     parser.add_argument("-o", "--out", dest="out", default="rep_cluster_genomes_info.txt", type=str, help="Output file path.")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
 
     if args.gtdb:

@@ -413,6 +413,9 @@ def main():
     parser.add_argument("-f", "--force", dest="force", type=str, default="False", help="Force all to rebuild.")
     parser.add_argument("-d", "--debug", dest="debug", type=str, default="False", help="Debug mode(not delete work directory).")
     parser.add_argument("-v", "--verbose", dest="is_show_detailed_log", type=str, default="False", help="Show detailed log.")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
     # print("\nProgram settings:\n")
     # for arg in vars(args):

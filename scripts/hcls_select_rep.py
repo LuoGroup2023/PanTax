@@ -73,7 +73,7 @@ def rebuild_matrix(matrix_file, out_dir):
     return rebuild_matrix_file    
 
 def hcls(matrix_file, method, cutoff, out_dir):
-    with open('tem_hcls.R', 'w+') as f:
+    with open(f'{out_dir}/tem_hcls.R', 'w+') as f:
         f.write(f"""
             x <- read.table("{matrix_file}", header=T, row.names=1)
             d <- as.dist(as(x, "matrix"))
@@ -82,9 +82,9 @@ def hcls(matrix_file, method, cutoff, out_dir):
             res
         """)
 
-    subprocess.run('Rscript tem_hcls.R > hcls_res.txt', shell=True)
+    subprocess.run(f'Rscript {out_dir}/tem_hcls.R > {out_dir}/hcls_res.txt', shell=True)
 
-    with open('hcls_res.txt', 'r') as f:
+    with open(f'{out_dir}/hcls_res.txt', 'r') as f:
         lines = f.readlines()
 
     cluster = {}
@@ -117,8 +117,8 @@ def hcls(matrix_file, method, cutoff, out_dir):
             cls_genomes = ','.join(cluster[cluster_number])
             f.write(f"{cluster_number}\t{len(cluster[cluster_number])}\t{cls_genomes}\n")
 
-    Path("tem_hcls.R").unlink()
-    Path("cls_res.txt").unlink()
+    Path(f"{out_dir}/tem_hcls.R").unlink()
+    Path(f"{out_dir}/hcls_res.txt").unlink()
     return cls_file
 
 def pick_rep(matrix_file, cls_file, cutoff, out_dir):
@@ -130,7 +130,6 @@ def pick_rep(matrix_file, cls_file, cutoff, out_dir):
     strain_index = {}  # Strain name -> Index
     strain_path = {}   # Strain name -> Full file path
     strain_dist = {}   # Strain name -> Distance array
-    print(matrix_file)
     with open(matrix_file, 'r') as f:
         header = f.readline().strip().split('\t')
         for idx, genome in enumerate(header):
@@ -233,7 +232,7 @@ def pick_rep(matrix_file, cls_file, cutoff, out_dir):
 def main():
     parser = argparse.ArgumentParser(prog="python hcls_select_rep.py", usage=usage)
     parser.add_argument("-m", "--matrix", dest="matrix", type=str, help="ANI matrix (only applicable to FastANI matrix for now).")
-    parser.add_argument("-n", dest="genomes_num", type=int, help="Max genomes number used to build pangenome every species(default:10)")
+    parser.add_argument("-n", dest="genomes_num", type=str, help="Max genomes number used to build pangenome every species(default:10)")
     parser.add_argument("-f", "--genomes_info", dest="genomes_info", type=str, help="Genomes information file.")
     parser.add_argument("--gtdb", dest="gtdb", action="store_true", help="GTDB genome accession.")
     parser.add_argument("-hm", "--hcls_method", dest="hcls_method", default="complete", type=str, help="Hcls method. (single/complete)")
@@ -241,6 +240,9 @@ def main():
     parser.add_argument("-mf", "--matrix_filter", dest="matrix_filter", action="store_true", help="Filter matrix if genomes in matrix not all in genomes information file.")
     parser.add_argument("-o", "--output_dir", dest="output_dir", default="hcls_res", type=str, help="Output directory.")
     parser.add_argument("-t", "--threads", dest="threads", default=12, type=int, help="Threads. default:12")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
     
     global gtdb
@@ -249,6 +251,9 @@ def main():
     else:
         gtdb = False
     
+    if args.matrix == "None": args.matrix = None
+    if args.genomes_num == "None": args.genomes_num = None
+
     genomes_info_file = check_file_avail(args.genomes_info)
     out_dir = check_dir_avail(args.output_dir)
     if args.matrix:
@@ -267,7 +272,7 @@ def main():
         this_cluster_genomes = list(clusters[cluster_number])
         genomes.extend(this_cluster_genomes)
     if args.genomes_num:
-        genomes = genomes[:args.genomes_num]
+        genomes = genomes[:int(args.genomes_num)]
     genomes_info = pd.read_csv(genomes_info_file, sep="\t")
     filtered_genomes_info = genomes_info[genomes_info["id"].isin(genomes)]
     filtered_genomes_info.to_csv(f"{out_dir}/hcls_filtered_genomes_info.txt", sep="\t", index=False)

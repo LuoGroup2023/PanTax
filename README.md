@@ -199,6 +199,7 @@ conda install pantax -c bioconda -c conda-forge -c gurobi
 ```
 
 ## Citation
+```
 @article {Zhang2024.11.15.623887,
 	author = {Zhang, Wenhai and Liu, Yuansheng and Xu, Jialu and Chen, Enlian and Schonhuth, Alexander and Luo, Xiao},
 	title = {PanTax: Strain-level taxonomic classification of metagenomic data using pangenome graphs},
@@ -208,3 +209,4 @@ conda install pantax -c bioconda -c conda-forge -c gurobi
 	publisher = {Cold Spring Harbor Laboratory},
 	journal = {bioRxiv}
 }
+```

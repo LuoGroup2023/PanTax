@@ -91,6 +91,9 @@ def main():
     parser = argparse.ArgumentParser(prog="python build_graph.py", description=usage)
     parser.add_argument("species_eq1_genomes_info", type=str, help="Species eq1 genomes information file. Format: species_taxid\\tID\\n")
     parser.add_argument("wd", type=str, help="Work directory")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
     build_graph=BuildGraph(args.species_eq1_genomes_info, args.wd)
     build_graph.parallel_build_gfa()

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sys, gzip
 import pandas as pd
 import concurrent.futures

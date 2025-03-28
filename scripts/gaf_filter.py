@@ -79,6 +79,9 @@ def main():
     parser.add_argument('-i', '--gaf_file', dest="gaf_file", help="gaf file from graphAligner", required=True)
     parser.add_argument('-j', '--json_file', dest="json_file", help="json file from graphAligner", default=None)
     parser.add_argument("-s", "--species_range_file", dest="species_range_file", help="Species range file", default=None)
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
     if not args.json_file:
         filter_max_alignment(args.gaf_file)

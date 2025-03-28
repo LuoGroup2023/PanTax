@@ -15,6 +15,9 @@ def main():
     # parser.add_argument("-p", "--cluster", dest="species_cluster", default="all", type=str, help="Species cluster.")
     parser.add_argument("-c", "--custom", dest="custom_complete_genomes", default="custom_complete_genomes.txt", type=str, help="Specify custom complete genomes database(use without -r -s). Format: genomeID\tstrain_taxid\tspecies_taxid\ttorganism_name\tid.")
     parser.add_argument("--remove", dest="remove", default=True, type=bool, help="Wether to remove plasmid")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
     print("\nProgram settings:\n")
     for arg in vars(args):

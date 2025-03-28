@@ -10,6 +10,9 @@ def main():
     parser.add_argument("-c", "--custom_genomes", dest="genomes_info_provided_custom", type=str, help="If use custom genomes information, this step will filter unused genomes information")
     parser.add_argument("-o", "--output_dir", dest="output_dir", type=str, help="Output dir")
     parser.add_argument("--gtdb", dest="gtdb", action="store_true", help="GTDB genome accession.")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
     if args.genomes_info_provided_custom:
         try:

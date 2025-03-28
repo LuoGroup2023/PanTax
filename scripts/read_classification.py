@@ -2,7 +2,7 @@
 # process read classfication file with multiple processes and threads, but it need gaf(it only use in the script, so it need some time to produce)
 # And it use pandas to read whole file once, so it need too many memory.
 # 2G data need 10 min, may be less. Some step can be optimized.
-import argparse, re
+import argparse, re, sys
 import numpy as np
 import pandas as pd
 from typing import List
@@ -79,6 +79,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="python read_classification.py")
     parser.add_argument("-s", "--species_range_file", dest="species_range_file", type=str, help="Species range file")
     parser.add_argument("-m", "--mapped_gaf_file", dest="mapped_gaf_file", type=str, help="Mapped gfa file")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
     if not args.mapped_gaf_file:
         args.mapped_gaf_file = "gfa_mapped.gaf"

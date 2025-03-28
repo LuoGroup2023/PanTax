@@ -12,9 +12,10 @@ usage = "Using graph-based clustering algorithms to reduce genome redundancy and
 
 class GenomesCluster:
 
-    def __init__(self, summary_file_path, genomes_info, database, output_cluster, gtdb, m, n, p, j):
+    def __init__(self, summary_file_path, genomes_info, genome_stat, database, output_cluster, gtdb, m, n, p, j):
         self.summary_file_path = summary_file_path
         self.genomes_info = genomes_info
+        self.genome_stat = genome_stat
         self.database = database
         self.output_cluster = output_cluster
         self.gtdb_accession = gtdb
@@ -22,7 +23,7 @@ class GenomesCluster:
         self.n = n
         self.p = p
         self.j = j
-        self.genome_statics_data = self.genome_statics_data_read("genome_statics.txt")
+        self.genome_statics_data = self.genome_statics_data_read(genome_stat)
         if os.path.exists(self.summary_file_path):
             self.reference_or_respresentative_species_set = self.preprocess()
         else:
@@ -275,6 +276,7 @@ if __name__ == "__main__":
     parser.add_argument("-n", default=10, type=int, help="Max genomes number used to build pangenome every species(default:10)")
     parser.add_argument("-s", "--summary_file", dest="summary_file_path", default="assembly_summary_bacteria.txt", type=str, help="Assembly summary file path")
     parser.add_argument("-i", "--genomes_info", dest="genomes_info", default="genomes_info_provided_origin.txt", type=str, help="Provided genomes information. Same with custom option in the last step")
+    parser.add_argument("-gs", "--genome_stat", dest="genome_stat", default="genome_stat.txt", type=str, help="Genome statistics file path")
     parser.add_argument("-d", "--database", dest="database", default="reference_genomes_database", type=str, help="All genomes database path(absolute path better)")
     parser.add_argument("-o", "--output_cluster", dest="output_cluster", default="output_cluster", type=str, help="Output genomes cluster path")
     parser.add_argument("-p", default=2, type=int, help="Number of parallel processes used for ANI calculation(default:2)")
@@ -289,7 +291,7 @@ if __name__ == "__main__":
         print(arg, "=", getattr(args, arg))
     log = Logger()
     args.database = os.path.abspath(args.database)
-    genomes_cluster = GenomesCluster(args.summary_file_path, args.genomes_info, args.database, args.output_cluster, args.gtdb, args.m, args.n, args.p, args.j)
+    genomes_cluster = GenomesCluster(args.summary_file_path, args.genomes_info, args.genome_stat, args.database, args.output_cluster, args.gtdb, args.m, args.n, args.p, args.j)
     species_clusters = genomes_cluster.genome_cluster()
     log.logger.info(f"Cluster species number:{len(species_clusters)}")
     species_taxid = list(species_clusters.keys())

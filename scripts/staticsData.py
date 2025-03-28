@@ -13,6 +13,7 @@ def main():
     parser.add_argument("--filename", default=None, help="input a path of a fasta file ")  
     parser.add_argument("--filelist", default=None, help="input a path of a file with paths of fasta file")
     parser.add_argument("-t", "--threads", dest="threads", default=1, type=int, help="threads")
+    parser.add_argument("-o", "--out", dest="out", default="genome_statics.txt", type=str, help="Output file path.")
     args = parser.parse_args()
     log = Logger()
     filename = args.filename
@@ -20,7 +21,7 @@ def main():
     if filename is not None:
         single_fasta_statics(filename)
     elif filelist is not None:
-        parallel_write(filelist, args.threads)
+        parallel_write(filelist, args.threads, args.out)
         log.logger.info("Stat basic information of nucleic acid sequence file in fasta format successfully.")
     return
 
@@ -217,7 +218,7 @@ def statics_and_collect(file_path):
     filename = os.path.basename(file_path)
     return f"{filename}\t{sca_total_number}\t{genome_total_length}\t{sca_gap_length}\t{'%.2f' % sca_avg_length}\t{sca_N50}\t{sca_N90}\t{len(sca_max_length)}\t{len(sca_min_length)}\t{'%.2f' % sca_GC}\n"
 
-def parallel_write(filelist, threads):
+def parallel_write(filelist, threads, out_path):
     with open(filelist, "r") as f:
         all_paths = [line.strip() for line in f]
     
@@ -229,7 +230,7 @@ def parallel_write(filelist, threads):
             chunk = all_paths[i:i + chunk_size]
             futures = [executor.submit(statics_and_collect, path) for path in chunk]
             
-            with open("genome_statics.txt", 'a') as file:
+            with open(f"{out_path}", 'a') as file:
                 for future in concurrent.futures.as_completed(futures):
                     file.write(future.result())
     print("All tasks completed and results written to genome_statics.txt.")

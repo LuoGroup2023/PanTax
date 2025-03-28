@@ -14,6 +14,9 @@ def main():
     parser.add_argument("read_type", type=str, help="long/short")
     parser.add_argument("-ft", "--isfilter", dest="isfilter", type=int, default=1, help="MAPQ-based filter")
     parser.add_argument("wd", type=str, default=None, help="Work directory")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
     global wd
     wd = args.wd
