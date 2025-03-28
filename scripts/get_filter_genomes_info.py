@@ -1,4 +1,4 @@
-import sys
+import sys, gzip
 import pandas as pd
 import concurrent.futures
 
@@ -37,10 +37,16 @@ def get_genome_to_seqid(genome2id):
     genome2seqid.columns = ["genome_ID", "seq_id"]
     return genome2seqid
 
+def open_file(file_path):
+    if file_path.endswith(".gz"):
+        return gzip.open(file_path, "rt")
+    else:
+        return open(file_path, "r")
+
 def process_genome(genome, id):
     sequence_ids = []
     try:
-        with open(id, "r") as f:
+        with open_file(id) as f:
             for line in f:
                 if line.startswith(">"):
                     seq_id = line[1:].strip().split(" ", 1)[0]

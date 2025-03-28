@@ -11,8 +11,6 @@ from typing import Dict, List, Tuple, Union
 from functools import partial
 from collections import deque
 
-random.seed(42)
-
 usage = "Compute strain abundance"
 
 def main():
@@ -25,9 +23,9 @@ def main():
     parser.add_argument("species_abundance_file", type=str, help="Species abundance file")
     parser.add_argument("-sq", "--sylph_query", dest="sylph_query_file", type=str, help="Sylph query file")
     parser.add_argument("-c", "--min_cov", dest="min_cov", type=float, default=0, help="Minimum coverage required per strain")
-    parser.add_argument("-d", "--min_depth", dest="min_depth", type=int, default=0, help="Output a list of nodes with sequence depth less than <min_depth>.")
+    parser.add_argument("-d", "--min_depth", dest="min_depth", type=int, default=0, help="Graph nodes with sequence coverage depth more than <min_depth>.")
     parser.add_argument("-fr", "--unique_trio_nodes_fraction", dest="unique_trio_nodes_fraction", type=float, default=0.3, help="Unique trio nodes fraction")
-    parser.add_argument("-fc", "--unique_trio_nodes_count", dest="unique_trio_nodes_count", type=float, default=0.45, help="Unique trio nodes mean count fraction")
+    parser.add_argument("-fc", "--unique_trio_nodes_count", dest="unique_trio_nodes_count", type=float, default=0.46, help="Unique trio nodes mean count fraction")
     parser.add_argument("-a", "--min_species_abundance", dest="min_species_abundance", type=float, default=1e-04, help="Minimum species abundance(filter low abundance species)")
     parser.add_argument("-t", "--threads", dest="threads", type=int, default=64, help="Set number of threads used for species.")
     parser.add_argument("-gt", "--gurobi_threads", dest="gurobi_threads", type=int, default=1, help="Set number of threads used for Gurobi.")
@@ -35,7 +33,10 @@ def main():
     parser.add_argument("--sample", dest="sample", type=int, default=None, help="Sampling nodes(500000) are used for the graph with too many nodes.")
     parser.add_argument("--sample_test", dest="sample_test", type=int, default=0, help="Sampling nodes are used for small model testing")
     # for test
+    parser.add_argument("-rt", "--read_type", dest="read_type", type=str, default=None, help="Read type (short/long).")
     parser.add_argument("-sd", "--single_cov_diff", dest="single_cov_diff", type=float, default=0.2, help="Coverage difference for the species with single strain.")
+    parser.add_argument("-sr", "--single_cov_ratio", dest="single_cov_ratio", type=float, default=0.85, help="Single species strain level coverage ratio (Identify strains with high confidence).")
+    parser.add_argument("-sh", "--shift", dest="shift", type=str, default=True, help="Unique_trio_nodes_fraction varies with strain coverage depth when estimating single species.")
     parser.add_argument("-m", "--mode", dest="mode", type=str, default="all", help="Select output pangenome result.")
     parser.add_argument("-p", "--parallel", dest="parallel", type=str, default="true", help="Whether parallel POA.")
     parser.add_argument("-ds", "--designated_species", dest="designated_species", type=str, default=None, help="Only return designated species result.")
@@ -61,18 +62,25 @@ class StrainAbundanceEst():
             log = Logger(level="debug").logger
         else:
             log = Logger(level="info").logger
-        global mode, verbose, sample_test, sample
+        global mode, verbose, sample_test, sample, shift, read_type
         mode = self.mode    
         verbose = self.verbose
         sample_test = self.sample_test    
         sample = self.sample
+        read_type = self.read_type
         if self.parallel.lower() == "true":
             self.parallel = True
         else:
             self.parallel = False
         self.minimization_min_cov = 0
-        if self.designated_species != "0" and self.designated_species:
+        if (self.designated_species != "None" and self.designated_species != "-") and self.designated_species:
             self.designated_species = self.designated_species.strip().split(",")
+        else:
+            self.designated_species = None
+        if self.shift.lower() == "true":
+            shift = True
+        else:
+            shift = False
 
     def prepare_before_poa(self):
         self.otu_to_range: Dict[str, List[str]] = {} # [key] = species_taxid, [value] = [start,end] -> the start and end position in reference_pangenome.gfa
@@ -86,6 +94,11 @@ class StrainAbundanceEst():
             self.worker_num = self.threads // self.gurobi_threads
         else:
             self.worker_num = self.threads
+        global single_species
+        if len(self.otu_to_range) == 1:
+            single_species = True
+        else:
+            single_species = False
         log.info("Reading GAF file...")
         global read_group_data
         read_group_data = self.read_group_data = read_gaf(self.read_cls, self.aln_file)
@@ -118,7 +131,8 @@ class StrainAbundanceEst():
                                 min_cov=self.min_cov, 
                                 unique_trio_nodes_fraction=self.unique_trio_nodes_fraction, 
                                 unique_trio_nodes_count=self.unique_trio_nodes_count,
-                                gurobi_threads=self.gurobi_threads)
+                                gurobi_threads=self.gurobi_threads,
+                                single_cov_ratio=self.single_cov_ratio)
         if self.parallel:
             log.info(f"Parallel execution of strain optimization(threads {self.threads}, worker num {self.worker_num}, gurobipy threads {self.gurobi_threads})...")
             with concurrent.futures.ProcessPoolExecutor(max_workers=self.worker_num) as executor:
@@ -135,7 +149,7 @@ class StrainAbundanceEst():
                         log.info(f"Strain abundance estimate percentage: {round(current_percentage, 1)}%")
                         last_percentage = current_percentage
         else:
-            log.info("Sequential execution of strain optimization...")
+            log.info(f"Sequential execution of strain optimization(gurobipy threads {self.gurobi_threads})...")
             for key, value in self.otu_to_range.items():
                 result = partial_process(key, value)
                 if result:
@@ -190,9 +204,11 @@ class StrainAbundanceEst():
         species_taxid = otu_mapping_list[0][0]
         strains: List[str] = [] 
         strains_coverage: List[Union[int, float]] = []
-        for mapping in otu_mapping_list:
-            strains.append(mapping[1])
-            strains_coverage.append(mapping[7])
+        for i in range(len(otu_mapping_list)):
+            strains.append(otu_mapping_list[i][1])
+            if otu_mapping_list[i][8] == True and otu_mapping_list[i][3] != "-" and otu_mapping_list[i][7] != "-":
+                otu_mapping_list[i][7] = min(otu_mapping_list[i][3], otu_mapping_list[i][7])
+            strains_coverage.append(otu_mapping_list[i][7])
         species_coverage = species_abundance_df[species_abundance_df["species_taxid"] == species_taxid]["avg_coverage"].tolist()[0]
         total_cov_diff = abs(sum(strains_coverage)-species_coverage)/((sum(strains_coverage)+species_coverage)/2)
         for i in range(len(otu_mapping_list)):
@@ -201,13 +217,15 @@ class StrainAbundanceEst():
             factor = species_coverage/sum(strains_coverage)
             strains_coverage = np.array(strains_coverage)*factor
             for i in range(len(otu_mapping_list)):
-                otu_mapping_list[i][7] = strains_coverage[i]
+                if not otu_mapping_list[i][8]:
+                    otu_mapping_list[i][7] = strains_coverage[i]
         return otu_mapping_list
 
     def abundance_cal(self) -> None:
         genomes_info = pd.read_csv(self.genomes_info, sep="\t",usecols=[0,1],dtype={"genome_ID": str, "strain_taxid": str})
         genomes_info["hap_id"] = genomes_info["genome_ID"].str.split("_").str[:2].str.join("_")
-        otu_cov_df = pd.DataFrame(self.otu_cov, columns=["species_taxid", "hap_id", "unique_trio_fraction", "uniq_trio_cov_mean", "path_base_cov", "first_sol", "strain_cov_diff", "predicted_coverage", "total_cov_diff"])
+        otu_cov_df = pd.DataFrame(self.otu_cov, columns=["species_taxid", "hap_id", "unique_trio_fraction", "uniq_trio_cov_mean", "path_base_cov", "first_sol", "strain_cov_diff", "predicted_coverage", "is_exists", "total_cov_diff"])
+        otu_cov_df = otu_cov_df.drop(columns=["is_exists"])
         otu_cov_df = pd.merge(otu_cov_df, genomes_info, on="hap_id", how="left")
         otu_cov_df["predicted_abundance"] = otu_cov_df["predicted_coverage"] / otu_cov_df["predicted_coverage"].sum()
         new_order = ["species_taxid", "strain_taxid", "genome_ID", "predicted_coverage", "predicted_abundance", "path_base_cov", "unique_trio_fraction", "uniq_trio_cov_mean", "first_sol","strain_cov_diff", "total_cov_diff"]
@@ -227,7 +245,7 @@ class StrainAbundanceEst():
 
 def optimize_otu(otu: str, otu_range: List[str], db: str, min_depth: int, 
                           minimization_min_cov: int, min_cov: float, unique_trio_nodes_fraction: float, 
-                          unique_trio_nodes_count: float, gurobi_threads: int):
+                          unique_trio_nodes_count: float, gurobi_threads: int, single_cov_ratio: float):
     # otu_range = self.otu_to_range[otu]
     start = int(otu_range[0])-1
     end = int(otu_range[1])-1
@@ -258,7 +276,7 @@ def optimize_otu(otu: str, otu_range: List[str], db: str, min_depth: int,
     if non_zero_count == 0 or max(otu_abundance_list) == 0 :
         return [[otu, hap_id]+["-"]*4+[0] for hap_id in haps_id]
     # Now solve the minimization problem  
-    result = optimize(otu_abundance_list, nvert, paths, hap2unique_trio_nodes_m, unique_trio_node_abundances, node_base_cov, node_base_all, minimization_min_cov, unique_trio_nodes_fraction, min_cov, unique_trio_nodes_count, gurobi_threads)
+    result = optimize(otu_abundance_list, nvert, paths, hap2unique_trio_nodes_m, unique_trio_node_abundances, node_base_cov, node_base_all, minimization_min_cov, unique_trio_nodes_fraction, min_cov, unique_trio_nodes_count, gurobi_threads, single_cov_ratio)
     if result:
         hap_metrics, objVal = result
         return [[otu] + _hap_metrics for _hap_metrics in hap_metrics]
@@ -270,6 +288,10 @@ def trio_nodes_info(paths: Dict[str, List[int]], nodes_len_npy: np.ndarray):
     hap_trio_paths: Dict[str, List[Tuple[int, int, int]]] = {}
     # chop trio nodes for all paths
     for hap, path in paths.items():
+        # trio_path = []
+        # for i in range(len(path)-2):
+        #     if read_type and read_type == "short" and nodes_len_npy[path[i+1]] > 150: continue
+        #     trio_path.append((path[i], path[i+1], path[i+2]))
         trio_path = [(path[i], path[i+1], path[i+2]) for i in range(len(path)-2)]
         hap_trio_paths[hap] = trio_path
         trio_nodes.extend(trio_path)
@@ -336,7 +358,10 @@ def get_node_abundances(otu: str, nodes_len: Dict[int, int], trio_nodes: Dict[Tu
         # read_info -> [read_id, read_path, read_path_len, read_start, read_end]
         read_nodes = [int(match.group())-1-start for match in re.finditer(r'-?\d+', read_info[1])]
         # should keep the insertion order. Python version > 3.7 !!!
-        read_nodes_len_in_graph = {node:nodes_len[node] for node in read_nodes}
+        try:
+            read_nodes_len_in_graph = {node:nodes_len[node] for node in read_nodes}
+        except:
+            print(otu, read_info)
         start_node = read_nodes[0]
         end_node = read_nodes[-1]
         # read_path_len = int(read_info[2])
@@ -455,7 +480,7 @@ def get_node_abundances(otu: str, nodes_len: Dict[int, int], trio_nodes: Dict[Tu
 def optimize(
         a: List[int], nvert: int, paths: Dict[str, List[int]], 
         hap2trio_nodes_m: np.ndarray, trio_node_abundances: List[int], node_base_cov, node_base_all,
-        minimization_min_cov, unique_trio_nodes_fraction, min_cov, unique_trio_nodes_count, gurobi_threads
+        minimization_min_cov, unique_trio_nodes_fraction, min_cov, unique_trio_nodes_count, gurobi_threads, single_cov_ratio
         ):
         """
         Defines Gurobi minimization problem and then applies the LP solver.
@@ -473,7 +498,7 @@ def optimize(
         # set default value
         otu_paths = list(paths.values())
         haps_id = list(paths.keys())    
-        hap_metrics = [[_hap]+["-"]*5+[0] for _hap in haps_id]
+        hap_metrics = [[_hap]+["-"]*5+[0]+["-"] for _hap in haps_id]
         trio_node_abundances = np.array(trio_node_abundances)
         size = hap2trio_nodes_m.size
         same_path_flag = False
@@ -489,16 +514,34 @@ def optimize(
                 frequencies[selected_indices] = trio_node_abundances[selected_indices]
                 count_greater_than_zero = np.sum(frequencies > 0)
                 otu_unique_trio_nodes_fraction = count_greater_than_zero/len(selected_indices)
-                if verbose: print(f"\t\t{haps_id[idx]} unique trio node abundance > 0 ratio: {otu_unique_trio_nodes_fraction}")
                 hap_metrics[idx][1] = round(otu_unique_trio_nodes_fraction, 2)
-                if otu_unique_trio_nodes_fraction < unique_trio_nodes_fraction: continue
-                possible_strains_idx.append(idx)
-                non_zero_frequencies = frequencies[frequencies > 0]
-                non_zero_frequencies = filter_outliers(non_zero_frequencies, method='zscore')
-                # np.save(f"{haps_id[idx]}_non_zero_frequencies.npy", non_zero_frequencies)
-                frequencies_mean = np.mean(non_zero_frequencies) if len(non_zero_frequencies) > 0 else 0
-                possible_strains_frequencies_mean.append(frequencies_mean)
-                hap_metrics[idx][2] = round(frequencies_mean, 2)
+                if shift:
+                    non_zero_frequencies = frequencies[frequencies > 0]
+                    non_zero_frequencies = filter_outliers(non_zero_frequencies, method='zscore')    
+                    frequencies_mean = np.mean(non_zero_frequencies) if len(non_zero_frequencies) > 0 else 0
+                    if frequencies_mean >= 1:
+                        shift_unique_trio_nodes_fraction = unique_trio_nodes_fraction + (0.8-unique_trio_nodes_fraction)*frequencies_mean/100
+                        if shift_unique_trio_nodes_fraction >= 0.8:
+                            shift_unique_trio_nodes_fraction = 0.8
+                    else:
+                        shift_unique_trio_nodes_fraction = unique_trio_nodes_fraction*frequencies_mean
+                    if verbose: print(f"\t\t{haps_id[idx]} unique trio node abundance > 0 ratio: {otu_unique_trio_nodes_fraction}, shift unique trio nodes fraction: {shift_unique_trio_nodes_fraction}, frequencies mean: {frequencies_mean}")
+                    if otu_unique_trio_nodes_fraction < shift_unique_trio_nodes_fraction: continue
+                    possible_strains_idx.append(idx)
+                    possible_strains_frequencies_mean.append(frequencies_mean)
+                    hap_metrics[idx][2] = round(frequencies_mean, 2)
+                    
+                else:
+                    if verbose: print(f"\t\t{haps_id[idx]} unique trio node abundance > 0 ratio: {otu_unique_trio_nodes_fraction}")
+                    if otu_unique_trio_nodes_fraction < unique_trio_nodes_fraction: continue
+                    non_zero_frequencies = frequencies[frequencies > 0]
+                    non_zero_frequencies = filter_outliers(non_zero_frequencies, method='zscore')
+                    # np.save(f"{haps_id[idx]}_non_zero_frequencies.npy", non_zero_frequencies)
+                    frequencies_mean = np.mean(non_zero_frequencies) if len(non_zero_frequencies) > 0 else 0
+                    possible_strains_idx.append(idx)
+                    possible_strains_frequencies_mean.append(frequencies_mean)
+                    hap_metrics[idx][2] = round(frequencies_mean, 2)
+                    
             if verbose: print("\t\tFisrt filter #strains / #paths = {} / {}".format(len(possible_strains_idx), origin_paths_len))
             otu_paths = [otu_paths[idx] for idx in possible_strains_idx]
         elif origin_paths_len != 1 and size == 0:
@@ -531,16 +574,17 @@ def optimize(
         x = m.addVars(list(range(npaths)), lb=0, ub=1.05*max(a), vtype=GRB.CONTINUOUS, name='x')
         X = [x[i] for i in range(npaths)]
         X = np.array([X]).reshape(npaths,1)    #Set x in an array for multiplication
-        nvert_list = list(range(nvert))
+        nvert_list = list(np.where(np.array(a) > 0)[0])
+        non_zero_nvert_list_len = len(nvert_list)
+        # nvert_list = list(range(nvert))
 
         # Store paths in P: p_ij = 1 if node i contains path j
         # print('\nSave for every node which paths are passing through:')
-        # node_abundance = []
         for i in range(npaths):
-            node_abundance = []
+            # node_abundance = []
             for v in otu_paths[i]:
                 P[int(v),i] = 1
-                node_abundance.append(a[v])
+                # node_abundance.append(a[v])
             # np.save(f"{haps_id[i]}_node_abundance.npy", node_abundance)
                 # if self.mode == "single":
                 #     node_abundance.append(a[v])
@@ -551,18 +595,20 @@ def optimize(
         for _i, _x in enumerate(path_cov):
             ori_idx = possible_strains_idx[_i]
             hap_metrics[ori_idx][3] = _x / path_all_cov[_i]
+        
+        random.seed(42)
         if sample_test:
-            if nvert > 500:
+            if non_zero_nvert_list_len > 500:
                 sample_nodes = random.sample(nvert_list, 500)
                 sample_nodes = sorted(sample_nodes)
                 nvert_list = sample_nodes
         if not sample_test and sample:
-            if nvert > sample:
+            if non_zero_nvert_list_len > sample:
                 log.debug(f"The graph has too many nodes. Subsample {sample}.")
                 sample_nodes = random.sample(nvert_list, sample)
                 sample_nodes = sorted(sample_nodes)
                 nvert_list = sample_nodes
-
+        # print(nvert_list[:10])
         # If objective involves absolute values, add extra variables
         y = m.addVars(nvert_list, lb=0, vtype=GRB.CONTINUOUS, name='y')
         # log.debug(f"nvert len:{len(nvert_list)}\ty len:{len(y)}")
@@ -659,7 +705,23 @@ def optimize(
                     ori_idx = possible_strains_idx[idx]
                     hap_metrics[ori_idx][5] = f = round(f, 2)
                     if verbose: print(f"\t\t{haps_id[ori_idx]}\tfrequencies_mean:{frequencies_mean}\txsol:{x_sol[idx]}\tf:{f}")
-                    if f > unique_trio_nodes_count: selected_strains[idx] = 0
+                    if f > unique_trio_nodes_count:
+                        if f <= 0.6: 
+                            this_strain_single_cov_ratio =  hap_metrics[ori_idx][1] * hap_metrics[ori_idx][3]
+                            if this_strain_single_cov_ratio < single_cov_ratio or x_sol[idx] == 0:
+                                selected_strains[idx] = 0
+                            else:
+                                hap_metrics[ori_idx][7] = True
+                        else:
+                            selected_strains[idx] = 0
+                        # if single_species:
+                        #     this_strain_single_cov_ratio =  hap_metrics[ori_idx][1] * hap_metrics[ori_idx][3]
+                        #     if this_strain_single_cov_ratio < single_cov_ratio or x_sol[idx] == 0:
+                        #         selected_strains[idx] = 0
+                        #     else:
+                        #         hap_metrics[ori_idx][7] = True
+                        # else:    
+                        #     selected_strains[idx] = 0
             elif (origin_paths_len != 1 and size == 0 and same_path_flag) or origin_paths_len == 1: 
                 frequencies_mean = possible_strains_frequencies_mean[0]
                 if frequencies_mean:   
@@ -730,10 +792,18 @@ def optimize(
             sys.exit(1)
 
 def filter_outliers(data, method='iqr', threshold=3):
+    if data.size == 0:
+        return []
+    if np.isnan(data).any():
+        raise ValueError("Input data contains NaN values.")
     if method == 'zscore':
         mean = np.mean(data)
         std = np.std(data)
-        return [x for x in data if abs((x - mean) / std) < threshold]
+        if std == 0:
+            # print("Warning: Standard deviation is zero. Returning empty list.")
+            return []
+        else:
+            return [x for x in data if abs((x - mean) / std) < threshold]
     elif method == 'iqr':
         q1 = np.percentile(data, 25)
         q3 = np.percentile(data, 75)

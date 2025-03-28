@@ -93,6 +93,18 @@ def count_lines(filepath):
 def is_file_non_empty(file_path):
     return file_path.exists() and file_path.stat().st_size > 0
 
+def check_file_avail(file_path):
+    absolut_file_path = Path(file_path).resolve()
+    if is_file_non_empty(absolut_file_path):
+        return absolut_file_path
+    else:
+        raise FileNotFoundError(f"{absolut_file_path} does not exist, please check the path.")
+
+def check_dir_avail(dir):
+    dir = Path(dir).resolve()
+    dir.mkdir(exist_ok=True)
+    return dir
+
 def read_gfa(graph_name: str, previous: int = 0):
     """
     Reads a graph from a GFA-file and returns graph in gt-format.
@@ -166,3 +178,11 @@ def read_h5py_file(file_name):
             node_len_grp = hf["node_len"]
             nodes_len_npy = node_len_grp["node_len"][:]
     return paths, nodes_len_npy
+
+# genome process
+def extract_genome_name(genome, gtdb):
+    if gtdb:
+        genome_ID = "_".join(str(Path(genome).name).split("_")[:2])
+    else:
+        genome_ID = re.sub(r"_genomic\.fna(\.gz)?$", "", str(Path(genome).name))
+    return genome_ID

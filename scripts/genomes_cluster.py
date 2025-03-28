@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import sys, os, subprocess, argparse
+import sys, os, subprocess, argparse, re
 import concurrent.futures
 import numpy as np
 import pandas as pd
@@ -8,15 +8,16 @@ import networkx as nx
 from itertools import combinations
 from toolkits import Logger
 
-usage = "Filter genomes and cluster at the strain and species levels"
+usage = "Using graph-based clustering algorithms to reduce genome redundancy and obtain non-redundant genomes."
 
 class GenomesCluster:
 
-    def __init__(self, summary_file_path, genomes_info, database, output_cluster, m, n, p, j):
+    def __init__(self, summary_file_path, genomes_info, database, output_cluster, gtdb, m, n, p, j):
         self.summary_file_path = summary_file_path
         self.genomes_info = genomes_info
         self.database = database
         self.output_cluster = output_cluster
+        self.gtdb_accession = gtdb
         self.m = m
         self.n = n
         self.p = p
@@ -50,7 +51,10 @@ class GenomesCluster:
         """For every strain, if meet the conditions(eg. N50), added to species cluster"""
         genome_statics_data = self.genome_statics_data
         filter_genomes = genome_statics_data["bacteria"].tolist()
-        filter_genomes = [file.replace("_genomic.fna", "") for file in filter_genomes]
+        if not self.gtdb_accession:
+            filter_genomes = [re.sub(r"_genomic\.fna(\.gz)?$", "", file) for file in filter_genomes]
+        else:
+            filter_genomes = ["_".join(file.split("_")[:2]) for file in filter_genomes]
         filter_genomes_df = pd.DataFrame({"genome_ID": filter_genomes})
         provided_genomes = pd.read_csv(self.genomes_info, sep="\t")
         filter_genomes_info = pd.merge(filter_genomes_df, provided_genomes, on="genome_ID", how="left")
@@ -58,8 +62,9 @@ class GenomesCluster:
         grouped_genomes_info = filter_genomes_info.groupby("species_taxid")
         cluster_species = {}
         for species_taxid, group in grouped_genomes_info:
-            grouped_genomes = group["genome_ID"].tolist()
-            grouped_genomes = [genome + "_genomic.fna" for genome in grouped_genomes]
+            grouped_genomes = group["id"].tolist()
+            grouped_genomes = [os.path.basename(genome) for genome in grouped_genomes]
+            if self.gtdb_accession: species_taxid = species_taxid.replace(" ", "_")
             cluster_species[species_taxid] = grouped_genomes
         return cluster_species
 
@@ -119,10 +124,14 @@ class GenomesCluster:
 
     def gernerate_map_file(self, species_taxid, species_cluster, reference_or_respresentative_species_set):    
         """Select genomes used to cluster."""
+        # if not os.path.exists(f"{self.output_cluster}/{species_taxid}/{species_taxid}_result.txt"):
+        #     print(f"{self.output_cluster}/{species_taxid}")
+        #     subprocess.run(f"rm -rf {self.output_cluster}/{species_taxid}", shell=True)
         if not os.path.exists(f"{self.output_cluster}/{species_taxid}"):
             os.mkdir(f"{self.output_cluster}/{species_taxid}")
             species_cluster = list(set(species_cluster))
-            if len(species_cluster) > self.m:
+            if self.m == -1: self.m = len(species_cluster)
+            if len(species_cluster) >= self.m:
                 genome_statics_data = self.genome_statics_data
                 strain_subset = genome_statics_data[genome_statics_data["bacteria"].isin(species_cluster)].reset_index()
                 strain_subset.sort_values(by='sca_N50', ascending=False, inplace=True)
@@ -144,7 +153,7 @@ class GenomesCluster:
 
     def parallel_compute(self, species_taxid, species_clusters):
         partial_process = partial(self.gernerate_map_file, reference_or_respresentative_species_set = self.reference_or_respresentative_species_set)
-        with concurrent.futures.ProcessPoolExecutor() as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=self.j) as executor:
             futures = {key: executor.submit(partial_process, key, paths) for key, paths in species_clusters.items()}
             concurrent.futures.wait(futures.values())
         # for taxid in species_taxid:
@@ -158,6 +167,7 @@ class GenomesCluster:
         failure_file = f"{self.output_cluster}/{species_taxid}/failure_file.txt"
         if not os.path.exists(failure_file):
             with open(failure_file, "w") as failure_f:
+                if self.n == -1: self.n = len(genome_data_set)
                 for bacteria_file in genome_data_set[:self.n]:
                     bacteria_file = os.path.basename(bacteria_file)
                     source_path = os.path.join(source_dir, bacteria_file)
@@ -265,24 +275,25 @@ if __name__ == "__main__":
     parser.add_argument("-n", default=10, type=int, help="Max genomes number used to build pangenome every species(default:10)")
     parser.add_argument("-s", "--summary_file", dest="summary_file_path", default="assembly_summary_bacteria.txt", type=str, help="Assembly summary file path")
     parser.add_argument("-i", "--genomes_info", dest="genomes_info", default="genomes_info_provided_origin.txt", type=str, help="Provided genomes information. Same with custom option in the last step")
-    parser.add_argument("-d", "--database", dest="database", default="complete_genome_without_plasmid", type=str, help="Complete genomes database path(absolute path better)")
+    parser.add_argument("-d", "--database", dest="database", default="reference_genomes_database", type=str, help="All genomes database path(absolute path better)")
     parser.add_argument("-o", "--output_cluster", dest="output_cluster", default="output_cluster", type=str, help="Output genomes cluster path")
     parser.add_argument("-p", default=2, type=int, help="Number of parallel processes used for ANI calculation(default:2)")
     parser.add_argument("-j", default=32, type=int, help="Number of parallel processes used for fastANI(default:32)")
-    parser.add_argument("--compute", dest="compute", default="1", type=str, help="on 1(default), off 0")
-    parser.add_argument("--cluster", dest="cluster", default="1", type=str, help="on 1(default), off 0")
-    parser.add_argument("--test", dest="test", default="0", type=str, help="on 1, off 0(default)")
+    parser.add_argument("--gtdb", dest="gtdb", action="store_true", help="GTDB genome accession.")
+    parser.add_argument("--compute", dest="compute", action="store_true", help="ANI calculation.")
+    parser.add_argument("--cluster", dest="cluster", action="store_true", help="Genomes cluster based on ANI.")
+    parser.add_argument("--test", dest="test", action="store_true", help="Test.")
     args = parser.parse_args()
     print("\nProgram settings:\n")
     for arg in vars(args):
         print(arg, "=", getattr(args, arg))
     log = Logger()
     args.database = os.path.abspath(args.database)
-    genomes_cluster = GenomesCluster(args.summary_file_path, args.genomes_info, args.database, args.output_cluster, args.m, args.n, args.p, args.j)
+    genomes_cluster = GenomesCluster(args.summary_file_path, args.genomes_info, args.database, args.output_cluster, args.gtdb, args.m, args.n, args.p, args.j)
     species_clusters = genomes_cluster.genome_cluster()
     log.logger.info(f"Cluster species number:{len(species_clusters)}")
     species_taxid = list(species_clusters.keys())
-    if args.test == "1":
+    if args.test:
         log.logger.info("Executing test compute steps")
         if not os.path.exists(args.output_cluster):
             os.mkdir(args.output_cluster)
@@ -292,19 +303,19 @@ if __name__ == "__main__":
         genomes_cluster.parallel_compute(first_10_keys, small_dict)
         log.logger.info("Executing test cluster steps")
         genomes_cluster.parallel_cls(first_10_keys)
-        sys.exit(1)
-    if args.compute == "1":
+        sys.exit(0)
+    if args.compute:
         log.logger.info("Executing compute steps")
         if not os.path.exists(args.output_cluster):
             os.mkdir(args.output_cluster)
         genomes_cluster.parallel_compute(species_taxid, species_clusters)
     else:
         log.logger.info("Warning: skipping computing steps")
-    if args.cluster == "1":
+    if args.cluster:
         log.logger.info("Executing cluster steps")
         genomes_cluster.parallel_cls(species_taxid)
     else:
         log.logger.info("Warning: skipping cluster steps")
-    log.logger.info("Genomes cluster completely.")
+    log.logger.info("Completely.")
 
     

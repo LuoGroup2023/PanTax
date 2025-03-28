@@ -148,7 +148,11 @@ class TaskScheduling:
                 for genome in genomes:
                     genome_name = Path(genome).name
                     genome_name = "_".join(genome_name.split("_")[:2])
-                    cmd_tmp_list.append(f"{self.fastix} {genome} -p '{genome_name}#1#' > {self.wd}/{species}/{genome_name}.fa") 
+                    if genome.endswith("gz"):
+                        gunzip_genome_name = Path(genome).name.replace(".gz", "")
+                        cmd_tmp_list.append(f"gunzip -c {genome} > {self.wd}/{species}/{gunzip_genome_name}; {self.fastix} {self.wd}/{species}/{gunzip_genome_name} -p '{genome_name}#1#' > {self.wd}/{species}/{genome_name}.fa")
+                    else:
+                        cmd_tmp_list.append(f"{self.fastix} {genome} -p '{genome_name}#1#' > {self.wd}/{species}/{genome_name}.fa") 
                     new_genomes_path.append(f"{self.wd}/{species}/{genome_name}.fa")
                 cmd_tmp = "\n".join(cmd_tmp_list)
                 cmd2 = f"echo '{cmd_tmp}' | xargs -I{{}} -P {threads} bash -c '{{}}'"
@@ -192,6 +196,7 @@ class TaskScheduling:
             cmd8 = f"echo {species}"
             cmd.append(cmd8)
             self.all_cmd.append(("; ".join(cmd), threads, species))
+            # print("; ".join(cmd))
         # Sort the commands based on core requirements, for optimal allocation
         self.all_cmd.sort(key=lambda x: x[1], reverse=True)
 

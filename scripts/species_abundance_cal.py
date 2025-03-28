@@ -23,13 +23,19 @@ def main():
     genomes_stats = pd.read_csv(f"{species_genomes_len}", sep="\t", header=None, usecols=[0,1], dtype={0: str, 1: float, 2:float})
     genomes_stats.columns = ["species_taxid", "avg_len"]
     if args.read_type == "short":
-        # short read
-        if args.isfilter:
-            counts, read_len = short_filter_read_reads_cls(args.read_cls_file)
+        # if read_len != read_len_nrows100, that means reads were trimmed.
+        read_len = pd.read_csv(args.read_cls_file, header=None, sep="\t", nrows=1).iloc[0,3]
+        read_len_nrows100 = pd.read_csv(args.read_cls_file, header=None, sep="\t", nrows=100).iloc[:,3].mean()
+        if read_len == read_len_nrows100:
+            # short read
+            if args.isfilter:
+                counts = short_filter_read_reads_cls(args.read_cls_file)
+            else:
+                counts = short_read_reads_cls(args.read_cls_file)
+                print(counts)
+            abundance_set = short_abundance_cal(counts, genomes_stats, read_len)
         else:
-            counts, read_len = short_read_reads_cls(args.read_cls_file)
-            print(counts)
-        abundance_set = short_abundance_cal(counts, genomes_stats, read_len)
+            abundance_set = long_read_reads_cls(args.read_cls_file, genomes_stats, args.isfilter)
     elif args.read_type == "long":
         # long read
         abundance_set = long_read_reads_cls(args.read_cls_file, genomes_stats, args.isfilter)
@@ -39,8 +45,7 @@ def short_read_reads_cls(cls_file_path: str, sep: str="\t", header=None, usecol=
     reads_cls_data = pd.read_csv(cls_file_path, sep=sep, header=header, usecols=[usecol],dtype=object)
     reads_cls_data.iloc[:,0] = reads_cls_data.iloc[:,0].fillna("0")
     counts = reads_cls_data.iloc[:,0].value_counts().sort_values(ascending=False)
-    read_len = pd.read_csv(cls_file_path, header=None, sep="\t", nrows=1).iloc[0,3]
-    return counts, read_len
+    return counts
 
 def short_filter_read_reads_cls(cls_file_path: str):
     reads_cls_data = pd.read_csv(cls_file_path, sep="\t", header=None, usecols=[1, 2],dtype={0:str, 1:int, 2:str, 3:int})
@@ -60,8 +65,7 @@ def short_filter_read_reads_cls(cls_file_path: str):
             index.append(group_name)
             value_counts.append(read_count)
     counts = pd.Series(value_counts, index=index)
-    read_len = pd.read_csv(cls_file_path, header=None, sep="\t", nrows=1).iloc[0,3]
-    return counts, read_len
+    return counts
 
 def long_read_reads_cls(cls_file_path: str, genomes_stats: pd.DataFrame, isfilter: int):
     reads_cls_data = pd.read_csv(cls_file_path, sep="\t", header=None, dtype={0:str, 1:int, 2:str, 3:int})

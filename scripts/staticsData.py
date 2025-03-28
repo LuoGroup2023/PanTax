@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import sys, os, argparse, fcntl
+import sys, os, argparse, fcntl, gzip
+from tqdm import tqdm
 # from prettytable import PrettyTable
 import concurrent.futures
 from toolkits import Logger
@@ -11,6 +12,7 @@ def main():
 
     parser.add_argument("--filename", default=None, help="input a path of a fasta file ")  
     parser.add_argument("--filelist", default=None, help="input a path of a file with paths of fasta file")
+    parser.add_argument("-t", "--threads", dest="threads", default=1, type=int, help="threads")
     args = parser.parse_args()
     log = Logger()
     filename = args.filename
@@ -18,15 +20,21 @@ def main():
     if filename is not None:
         single_fasta_statics(filename)
     elif filelist is not None:
-        parallel_write(filelist)
+        parallel_write(filelist, args.threads)
         log.logger.info("Stat basic information of nucleic acid sequence file in fasta format successfully.")
     return
+
+def open_file(file_path):
+    if file_path.endswith(".gz"):
+        return gzip.open(file_path, "rt")
+    else:
+        return open(file_path, "r")
 
 def read_data(filename):
     all_sequence = {}
     sequence_name = None
     sequence = []
-    with open(filename, 'r') as file:
+    with open_file(filename) as file:
         for line in file:
             line = line.rstrip('\n')
             if line.startswith('>'):
@@ -196,11 +204,35 @@ def statics_and_write(file_path):
                 fcntl.flock(lock, fcntl.LOCK_UN)
                 os.remove(lock_file)
 
-def parallel_write(filelist):
+# def parallel_write(filelist):
+#     with open(filelist, "r") as f:
+#         all_paths = [line.strip() for line in f]
+#     with concurrent.futures.ProcessPoolExecutor() as executor:
+#         executor.map(statics_and_write, all_paths)
+
+def statics_and_collect(file_path):
+    all_sequence = read_data(file_path)
+    sequences = list(all_sequence.values())   
+    sca_total_number, genome_total_length, sca_gap_length, sca_avg_length, sca_N50, sca_N90, sca_max_length, sca_min_length, sca_GC = scaffold_statics(sequences)
+    filename = os.path.basename(file_path)
+    return f"{filename}\t{sca_total_number}\t{genome_total_length}\t{sca_gap_length}\t{'%.2f' % sca_avg_length}\t{sca_N50}\t{sca_N90}\t{len(sca_max_length)}\t{len(sca_min_length)}\t{'%.2f' % sca_GC}\n"
+
+def parallel_write(filelist, threads):
     with open(filelist, "r") as f:
         all_paths = [line.strip() for line in f]
-    with concurrent.futures.ProcessPoolExecutor() as executor:
-        executor.map(statics_and_write, all_paths)
+    
+    futures = []
+    chunk_size = 10000
+    if len(all_paths) <= chunk_size: chunk_size = len(all_paths)
+    with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+        for i in tqdm(range(0, len(all_paths), chunk_size), desc="Processing chunks"):
+            chunk = all_paths[i:i + chunk_size]
+            futures = [executor.submit(statics_and_collect, path) for path in chunk]
+            
+            with open("genome_statics.txt", 'a') as file:
+                for future in concurrent.futures.as_completed(futures):
+                    file.write(future.result())
+    print("All tasks completed and results written to genome_statics.txt.")
 
 if __name__ == "__main__":
     sys.exit(main())
