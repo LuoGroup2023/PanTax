@@ -9,6 +9,9 @@ def main():
     parser.add_argument("genomes_info", type=str, help="Genomes information file.Format: genomeID\tstrain_taxid\tspecies_taxid\ttorganism_name\tid.")
     parser.add_argument("wd", type=str, help="Work directory")
     parser.add_argument("tmp", type=str, help="Tmp directory")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
     if not os.path.exists(f"{args.tmp}/species_pangenome"):
         prepare_species_genomes(args.genomes_info, args.wd, args.tmp)

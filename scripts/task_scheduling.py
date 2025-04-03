@@ -5,6 +5,9 @@ import time, asyncio
 from toolkits import Logger, delete_directory_contents, is_file_non_empty
 from pathlib import Path
 import pandas as pd
+
+script_path = Path(__file__).resolve()
+script_dir = script_path.parent 
 usage = "Task scheduling strategy for pangenome construction."
 """
 PGGB building genome time test: 8 threads-10 min, 16 threads-5 min, 32 threads-5 min, 64 threads-5 min for 10 genomes
@@ -93,6 +96,11 @@ class TaskScheduling:
         if used_threads < self.threads:
             self.fold = self.threads / used_threads
 
+        if self.save.lower() == "true":
+            self.save = True
+        else:
+            self.save = False
+
         if not self.sleep:
             self.sleep = 30
 
@@ -140,7 +148,11 @@ class TaskScheduling:
                 for genome in genomes:
                     genome_name = Path(genome).name
                     genome_name = "_".join(genome_name.split("_")[:2])
-                    cmd_tmp_list.append(f"{self.fastix} {genome} -p '{genome_name}#1#' > {self.wd}/{species}/{genome_name}.fa") 
+                    if genome.endswith("gz"):
+                        gunzip_genome_name = Path(genome).name.replace(".gz", "")
+                        cmd_tmp_list.append(f"gunzip -c {genome} > {self.wd}/{species}/{gunzip_genome_name}; {self.fastix} {self.wd}/{species}/{gunzip_genome_name} -p '{genome_name}#1#' > {self.wd}/{species}/{genome_name}.fa")
+                    else:
+                        cmd_tmp_list.append(f"{self.fastix} {genome} -p '{genome_name}#1#' > {self.wd}/{species}/{genome_name}.fa") 
                     new_genomes_path.append(f"{self.wd}/{species}/{genome_name}.fa")
                 cmd_tmp = "\n".join(cmd_tmp_list)
                 cmd2 = f"echo '{cmd_tmp}' | xargs -I{{}} -P {threads} bash -c '{{}}'"
@@ -175,12 +187,16 @@ class TaskScheduling:
                     cmd.append(cmd5_3)
             cmd6 = f"{self.vg} convert -g {self.wd}/{species}/species{species}_pangenome_building/*gfa -p -t {threads} > {self.wd}/{species}.vg; mv {self.wd}/{species}/species{species}_pangenome_building/*gfa {self.wd}/{species}.gfa"
             cmd.append(cmd6)
+            if self.save:
+                cmd_tmp = f"python {script_dir}/get_h5_from_gfa.py {self.wd}/{species}.gfa {self.wd}/{species}.h5; rm {self.wd}/{species}.gfa"
+                cmd.append(cmd_tmp)
             if not self.debug:
                 cmd7 = f"rm -rf {self.wd}/{species}"
                 cmd.append(cmd7)
             cmd8 = f"echo {species}"
             cmd.append(cmd8)
             self.all_cmd.append(("; ".join(cmd), threads, species))
+            # print("; ".join(cmd))
         # Sort the commands based on core requirements, for optimal allocation
         self.all_cmd.sort(key=lambda x: x[1], reverse=True)
 
@@ -246,7 +262,8 @@ class TaskScheduling:
                     result = task.result()  # Get the result of the task
                     result_gfa = Path(self.wd) / f"{result}.gfa"
                     result_vg = Path(self.wd) / f"{result}.vg"
-                    if not (is_file_non_empty(result_gfa) and is_file_non_empty(result_vg)):
+                    result_h5 = Path(self.wd) / f"{result}.h5"
+                    if not ((is_file_non_empty(result_gfa) or is_file_non_empty(result_h5)) and is_file_non_empty(result_vg)):
                         raise IOError(f"{result} gfa or vg files are either missing or empty.")
                     self.finished_pangenome_num += 1
                     current_percentage = self.finished_pangenome_num * 100 / self.pangenomes_need_to_build
@@ -390,11 +407,15 @@ def main():
     parser.add_argument("-e", "--pangenome_building_exe", type=str, default="pggb", help="Pangenome building executable file(PGGB, Minigraph-Cactus).")
     parser.add_argument("-r", "--reference", type=str, help="Reference genomes for each species(Minigraph-Cactus need).")
     parser.add_argument("-p", "--parallel", dest="parallel", type=str, default="True", help="Parallel task.")
+    parser.add_argument("-g", "--save", dest="save", type=str, default="False", help="Save GFA file information to h5 file.")
     parser.add_argument("-s", "--sleep", type=int, help="Parallel loop sleep time.")
     parser.add_argument("-t", "--threads", dest="threads", type=int, required=True, help="Max threads.")
     parser.add_argument("-f", "--force", dest="force", type=str, default="False", help="Force all to rebuild.")
     parser.add_argument("-d", "--debug", dest="debug", type=str, default="False", help="Debug mode(not delete work directory).")
     parser.add_argument("-v", "--verbose", dest="is_show_detailed_log", type=str, default="False", help="Show detailed log.")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
     # print("\nProgram settings:\n")
     # for arg in vars(args):

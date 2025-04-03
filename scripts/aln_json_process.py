@@ -9,6 +9,9 @@ def main():
     parser = argparse.ArgumentParser(prog="strain_abundance_cal.py", description=usage)
     parser.add_argument("read_cls_file", type=str, help="read classification file")
     parser.add_argument("aln_json_file", type=str, help="alignment json file")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
     read_group_data = read_group(args.read_cls_file, args.aln_json_file)
     # print(sys.getsizeof(read_group_data))

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-import sys, os, re, argparse, time, h5py, random
+import sys, os, re, argparse, time, random, logging
 import numpy as np
 import pandas as pd
 from gurobipy import *
-from tqdm import tqdm # progress tracker
-from functools import partial
 from aln_process import read_gaf
 import concurrent.futures 
-from toolkits import timeit, Logger
+from pathlib import Path
+from toolkits import timeit, Logger, read_gfa, read_h5py_file
 from typing import Dict, List, Tuple, Union
-os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+from functools import partial
+from collections import deque
 
 usage = "Compute strain abundance"
 
@@ -20,248 +20,281 @@ def main():
     parser.add_argument("read_cls", type=str, help="Reads classification file")
     parser.add_argument("aln_file", type=str, help="Reads alignment file(GAF format)")
     parser.add_argument("otu_range_file", type=str, help="OTUs range in graph")
-    parser.add_argument("species_abundance_file", type=str, help="Species abundancefile")
+    parser.add_argument("species_abundance_file", type=str, help="Species abundance file")
+    parser.add_argument("-sq", "--sylph_query", dest="sylph_query_file", type=str, help="Sylph query file")
     parser.add_argument("-c", "--min_cov", dest="min_cov", type=float, default=0, help="Minimum coverage required per strain")
-    parser.add_argument("-d", "--min_depth", dest="min_depth", type=int, default=0, help="Output a list of nodes with sequence depth less than <min_depth>.")
-    parser.add_argument("-fr", "--unique_trio_nodes_fraction", dest="fr", type=float, default=0.3, help="Unique trio nodes fraction")
-    parser.add_argument("-fc", "--unique_trio_nodes_count", dest="fc", type=float, default=0.45, help="Unique trio nodes mean count fraction")
+    parser.add_argument("-d", "--min_depth", dest="min_depth", type=int, default=0, help="Graph nodes with sequence coverage depth more than <min_depth>.")
+    parser.add_argument("-fr", "--unique_trio_nodes_fraction", dest="unique_trio_nodes_fraction", type=float, default=0.3, help="Unique trio nodes fraction")
+    parser.add_argument("-fc", "--unique_trio_nodes_count", dest="unique_trio_nodes_count", type=float, default=0.46, help="Unique trio nodes mean count fraction")
     parser.add_argument("-a", "--min_species_abundance", dest="min_species_abundance", type=float, default=1e-04, help="Minimum species abundance(filter low abundance species)")
     parser.add_argument("-t", "--threads", dest="threads", type=int, default=64, help="Set number of threads used for species.")
     parser.add_argument("-gt", "--gurobi_threads", dest="gurobi_threads", type=int, default=1, help="Set number of threads used for Gurobi.")
-    parser.add_argument("-s", "--save_graph_info", dest="s", type=int, default=0, help="Save graph information")
-    parser.add_argument("-v", "--verbose", dest="is_show_log", action="store_true", help="Show log")
-    parser.add_argument("--sample", dest="sample", type=int, default=0, help="Sampling nodes are used for small model testing")
+    parser.add_argument("-v", "--verbose", dest="verbose", action="store_true", help="Show log")
+    parser.add_argument("--sample", dest="sample", type=int, default=None, help="Sampling nodes(500000) are used for the graph with too many nodes.")
+    parser.add_argument("--sample_test", dest="sample_test", type=int, default=0, help="Sampling nodes are used for small model testing")
+    # for test
+    parser.add_argument("-rt", "--read_type", dest="read_type", type=str, default=None, help="Read type (short/long).")
+    parser.add_argument("-sd", "--single_cov_diff", dest="single_cov_diff", type=float, default=0.2, help="Coverage difference for the species with single strain.")
+    parser.add_argument("-sr", "--single_cov_ratio", dest="single_cov_ratio", type=float, default=0.85, help="Single species strain level coverage ratio (Identify strains with high confidence).")
+    parser.add_argument("-sh", "--shift", dest="shift", type=str, default=True, help="Unique_trio_nodes_fraction varies with strain coverage depth when estimating single species.")
+    parser.add_argument("-m", "--mode", dest="mode", type=str, default="all", help="Select output pangenome result.")
+    parser.add_argument("-p", "--parallel", dest="parallel", type=str, default="true", help="Whether parallel POA.")
+    parser.add_argument("-ds", "--designated_species", dest="designated_species", type=str, default=None, help="Only return designated species result.")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
 
-    global_t1_start = time.perf_counter()
-    global_t2_start = time.process_time()
-    log = Logger().logger
     print("\nProgram settings:\n")
     for arg in vars(args):
         print(arg, "=", getattr(args, arg))
     print()
-    global sample
-    sample = args.sample
-    species_graph_info = os.path.join(args.db, "species_graph_info")
-    if not os.path.exists(f"{species_graph_info}") and args.s:
-        os.mkdir("species_graph_info")
-    minimization_min_cov = 0
-    otu_to_range = read_cls(args.otu_range_file, args.species_abundance_file, args.min_species_abundance)
-    if len(otu_to_range) == 1:
-        args.gurobi_threads = max(args.threads, args.gurobi_threads)
-        args.threads = 1    
-    global read_group_data, is_show_log
-    is_show_log = args.is_show_log
-    read_group_data = read_gaf(args.read_cls, args.aln_file)
-    log.info("Parallel estimation of abundance for each strain of every species(this step takes a long time)...")
-    otu_cov: List[Tuple[str, str, Union[int, float]]] = [] # [(species_taxid, strain_record_name(i.e. GCF...), coverage)...]
-    partial_process = partial(parallel_optimize_otu, 
-                              pantax_db=args.db, 
-                              min_depth=args.min_depth, 
-                              minimization_min_cov=minimization_min_cov, 
-                              min_cov=args.min_cov, 
-                              unique_trio_nodes_fraction=args.fr, 
-                              unique_trio_nodes_mean_count_fraction=args.fc,
-                              s=args.s, 
-                              threads=args.gurobi_threads)
-    with concurrent.futures.ProcessPoolExecutor(max_workers=args.threads) as executor:
-        futures = {executor.submit(partial_process, key, value): key for key, value in otu_to_range.items()}
-        for future in concurrent.futures.as_completed(futures): 
-            result = future.result()
-            result = abundace_constraint(result, species_abundance_file = args.species_abundance_file)
-            # print(result)
-            otu_cov.extend(result)
-            # try:
-            #     result = future.result()
-            #     result = abundace_constraint(result, species_abundance_file = args.species_abundance_file)
-            #     # print(result)
-            #     otu_cov.extend(result)
-            # except Exception as e:
-            #     print(f"An error occurred in strain recall process: {e}")
-    abundance_cal(otu_cov, args.genomes_info)
 
-    t3_stop = time.perf_counter()
-    t4_stop = time.process_time()
+    strain_abundance_est = StrainAbundanceEst(**vars(args))
+    strain_abundance_est.run()
 
-    log.info("All strains optimize completed")
-    log.info("Elapsed time: {:.1f} seconds".format(t3_stop-global_t1_start))
-    log.info("CPU process time: {:.1f} seconds".format(t4_stop-global_t2_start))
-    print()
-    return
+class StrainAbundanceEst():
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+        self.set_paras()
 
-################################################################################
+    def set_paras(self):
+        global log
+        if self.verbose:
+            log = Logger(level="debug").logger
+        else:
+            log = Logger(level="info").logger
+        global mode, verbose, sample_test, sample, shift, read_type
+        mode = self.mode    
+        verbose = self.verbose
+        sample_test = self.sample_test    
+        sample = self.sample
+        read_type = self.read_type
+        if self.parallel.lower() == "true":
+            self.parallel = True
+        else:
+            self.parallel = False
+        self.minimization_min_cov = 0
+        if (self.designated_species != "None" and self.designated_species != "-") and self.designated_species:
+            self.designated_species = self.designated_species.strip().split(",")
+        else:
+            self.designated_species = None
+        if self.shift.lower() == "true":
+            shift = True
+        else:
+            shift = False
 
-def write_h5py_file(nodes_len_npy: np.ndarray, paths: Dict[str, List[int]], file_name: str):
-    """
-    Save the node length and path information of the graph in h5py format 
-    """
-    with h5py.File(file_name, "w") as hf:
-        path_grp = hf.create_group("paths")
-        for key,value in paths.items():
-            path_grp.create_dataset(key, data=np.array(value))
-        node_len_grp = hf.create_group("node_len")
-        node_len_grp.create_dataset("node_len", data=nodes_len_npy)
+    def prepare_before_poa(self):
+        self.otu_to_range: Dict[str, List[str]] = {} # [key] = species_taxid, [value] = [start,end] -> the start and end position in reference_pangenome.gfa
+        self.pangenome_eq1 = []
+        self.pangenome_ge2 = []
+        self.read_cls_file()
+        self.worker_num = self.threads // self.gurobi_threads
+        if self.worker_num > self.gurobi_threads and self.worker_num > len(self.otu_to_range):
+            factor = self.worker_num // len(self.otu_to_range)
+            self.gurobi_threads = self.gurobi_threads * factor
+            self.worker_num = self.threads // self.gurobi_threads
+        else:
+            self.worker_num = self.threads
+        global single_species
+        if len(self.otu_to_range) == 1:
+            single_species = True
+        else:
+            single_species = False
+        log.info("Reading GAF file...")
+        global read_group_data
+        read_group_data = self.read_group_data = read_gaf(self.read_cls, self.aln_file)
+        log.info("Reading GAF file...done")
+        self.otu_cov= [] # [(species_taxid, strain_record_name(i.e. GCF...), coverage)...]
 
-def read_h5py_file(file_name: str):
-    """
-    Get the node length and path information of the graph from h5py format if exists
-    """
-    with h5py.File(file_name, "r") as hf:
-            paths_grp = hf["paths"]
-            paths = {key: list(value[:]) for key, value in paths_grp.items()}
-            node_len_grp = hf["node_len"]
-            nodes_len_npy = node_len_grp["node_len"][:]
-    return paths, nodes_len_npy
+    def run_poa(self):
+        if self.mode == "all":
+            otu_list = list(self.otu_to_range.keys())
+        elif self.mode == "single":
+            otu_list = self.pangenome_eq1
+        elif self.mode == "double":
+            otu_list = self.pangenome_ge2
+        if self.designated_species:
+            ds_otu_range = {}
+            for _ds_otu in self.designated_species:
+                if _ds_otu in self.otu_to_range:
+                    ds_otu_range[_ds_otu] = self.otu_to_range[_ds_otu]
+                else:
+                    log.info(f"{_ds_otu} does not exist in graph.")
+            if ds_otu_range:
+                self.otu_to_range = ds_otu_range
+        count = 0
+        current_percentage = last_percentage = 0
+        all_species = len(otu_list)
+        partial_process = partial(optimize_otu, 
+                                db=self.db, 
+                                min_depth=self.min_depth, 
+                                minimization_min_cov=self.minimization_min_cov, 
+                                min_cov=self.min_cov, 
+                                unique_trio_nodes_fraction=self.unique_trio_nodes_fraction, 
+                                unique_trio_nodes_count=self.unique_trio_nodes_count,
+                                gurobi_threads=self.gurobi_threads,
+                                single_cov_ratio=self.single_cov_ratio)
+        if self.parallel:
+            log.info(f"Parallel execution of strain optimization(threads {self.threads}, worker num {self.worker_num}, gurobipy threads {self.gurobi_threads})...")
+            with concurrent.futures.ProcessPoolExecutor(max_workers=self.worker_num) as executor:
+                futures = {executor.submit(partial_process, key, value): key for key, value in self.otu_to_range.items()}
+                for future in concurrent.futures.as_completed(futures): 
+                    result = future.result()
+                    if result:
+                        result = self.abundace_constraint(result)
+                        # print(result)
+                        self.otu_cov.extend(result)
+                    count += 1
+                    current_percentage = count * 100 / all_species
+                    if current_percentage > last_percentage + 5:
+                        log.info(f"Strain abundance estimate percentage: {round(current_percentage, 1)}%")
+                        last_percentage = current_percentage
+        else:
+            log.info(f"Sequential execution of strain optimization(gurobipy threads {self.gurobi_threads})...")
+            for key, value in self.otu_to_range.items():
+                result = partial_process(key, value)
+                if result:
+                    result = self.abundace_constraint(result)
+                    self.otu_cov.extend(result)
+                    count += 1
+                    current_percentage = count * 100 / all_species
+                    if current_percentage > last_percentage + 5:
+                        log.info(f"Strain abundance estimate percentage: {round(current_percentage, 1)}%")
+                        last_percentage = current_percentage
 
-def parallel_optimize_otu(otu: str, otu_range: List[str], pantax_db: str, min_depth: int, 
+    def run(self):
+        global_t1_start = time.perf_counter()
+        global_t2_start = time.process_time()
+        self.prepare_before_poa()
+        self.run_poa()
+        self.abundance_cal()        
+        t3_stop = time.perf_counter()
+        t4_stop = time.process_time()
+
+        log.info("All strains optimize completed")
+        log.info("Elapsed time: {:.1f} seconds".format(t3_stop-global_t1_start))
+        log.info("CPU process time: {:.1f} seconds".format(t4_stop-global_t2_start))
+        print()
+
+    def read_cls_file(self):
+        """
+        Obtain species filtered for abundance, and then obtain their location information in the reference pangenome.
+        """
+        species_abundance = pd.read_csv(self.species_abundance_file, sep="\t", dtype={0:str, 1:float, 2:float})
+        species_abundance.columns = ["species_taxid", "abundance", "coverage"]
+        species_abundance = species_abundance[species_abundance["abundance"] > self.min_species_abundance]
+        otu_list = species_abundance["species_taxid"].tolist()
+        # otu_list = ["1589", "630"]
+        # print(len(otu_list))
+        with open(self.otu_range_file, "r") as f:
+            for line in f:
+                tokens = line.strip().split("\t")
+                otu = tokens[0]
+                if otu in otu_list:
+                    self.otu_to_range[otu] = (tokens[1], tokens[2])
+                    if len(tokens) == 4 and tokens[3] == "0":
+                        self.pangenome_eq1.append(otu)
+                    elif len(tokens) == 4 and tokens[3] == "1":
+                        self.pangenome_ge2.append(otu)
+
+
+    def abundace_constraint(self, otu_mapping_list):
+        species_abundance_df = pd.read_csv(self.species_abundance_file, sep="\t")
+        species_abundance_df.columns = ["species_taxid", "abundance", "avg_coverage"]
+        species_abundance_df["species_taxid"] = species_abundance_df["species_taxid"].astype(str)
+        species_taxid = otu_mapping_list[0][0]
+        strains: List[str] = [] 
+        strains_coverage: List[Union[int, float]] = []
+        for i in range(len(otu_mapping_list)):
+            strains.append(otu_mapping_list[i][1])
+            if otu_mapping_list[i][8] == True and otu_mapping_list[i][3] != "-" and otu_mapping_list[i][7] != "-":
+                otu_mapping_list[i][7] = min(otu_mapping_list[i][3], otu_mapping_list[i][7])
+            strains_coverage.append(otu_mapping_list[i][7])
+        species_coverage = species_abundance_df[species_abundance_df["species_taxid"] == species_taxid]["avg_coverage"].tolist()[0]
+        total_cov_diff = abs(sum(strains_coverage)-species_coverage)/((sum(strains_coverage)+species_coverage)/2)
+        for i in range(len(otu_mapping_list)):
+            otu_mapping_list[i].append(total_cov_diff)        
+        if max(strains_coverage) > 1.05*species_coverage:
+            factor = species_coverage/sum(strains_coverage)
+            strains_coverage = np.array(strains_coverage)*factor
+            for i in range(len(otu_mapping_list)):
+                if not otu_mapping_list[i][8]:
+                    otu_mapping_list[i][7] = strains_coverage[i]
+        return otu_mapping_list
+
+    def abundance_cal(self) -> None:
+        genomes_info = pd.read_csv(self.genomes_info, sep="\t",usecols=[0,1],dtype={"genome_ID": str, "strain_taxid": str})
+        genomes_info["hap_id"] = genomes_info["genome_ID"].str.split("_").str[:2].str.join("_")
+        otu_cov_df = pd.DataFrame(self.otu_cov, columns=["species_taxid", "hap_id", "unique_trio_fraction", "uniq_trio_cov_mean", "path_base_cov", "first_sol", "strain_cov_diff", "predicted_coverage", "is_exists", "total_cov_diff"])
+        otu_cov_df = otu_cov_df.drop(columns=["is_exists"])
+        otu_cov_df = pd.merge(otu_cov_df, genomes_info, on="hap_id", how="left")
+        otu_cov_df["predicted_abundance"] = otu_cov_df["predicted_coverage"] / otu_cov_df["predicted_coverage"].sum()
+        new_order = ["species_taxid", "strain_taxid", "genome_ID", "predicted_coverage", "predicted_abundance", "path_base_cov", "unique_trio_fraction", "uniq_trio_cov_mean", "first_sol","strain_cov_diff", "total_cov_diff"]
+        ori_otu_cov_df = otu_cov_df[new_order]
+        ori_otu_cov_df.to_csv("ori_strain_abundance.txt", sep="\t", index=False)
+        otu_cov_df = otu_cov_df.groupby("species_taxid").filter(
+            lambda group: not (len(group) == 1 and group["total_cov_diff"].iloc[0] > self.single_cov_diff)
+        )
+        otu_cov_df = otu_cov_df[(otu_cov_df["predicted_coverage"] >= self.min_cov) & (otu_cov_df["predicted_coverage"] != 0)]
+        otu_cov_df["predicted_abundance"] = otu_cov_df["predicted_coverage"] / otu_cov_df["predicted_coverage"].sum()
+        new_otu_cov_df = otu_cov_df.drop("hap_id", axis=1)
+        new_otu_cov_df = new_otu_cov_df[new_order]
+        new_otu_cov_df = new_otu_cov_df.sort_values(by="predicted_abundance", ascending=False)
+        # new_otu_cov_df = new_otu_cov_df.round(2)
+        new_otu_cov_df.to_csv("strain_abundance.txt", sep="\t", index=False)
+
+
+def optimize_otu(otu: str, otu_range: List[str], db: str, min_depth: int, 
                           minimization_min_cov: int, min_cov: float, unique_trio_nodes_fraction: float, 
-                          unique_trio_nodes_mean_count_fraction: float, s: int, threads: int) -> List[Tuple[str, str, Union[int, float]]]:
+                          unique_trio_nodes_count: float, gurobi_threads: int, single_cov_ratio: float):
+    # otu_range = self.otu_to_range[otu]
     start = int(otu_range[0])-1
     end = int(otu_range[1])-1
-    if is_show_log: print(f"Reading {otu}.gfa file...\n")        
-    if not s:
-        if is_show_log: print("Skipping save graph information")
-        if os.path.exists(f"{pantax_db}/species_gfa"):
-            paths, nodes_len_npy  = read_gfa(f"{pantax_db}/species_gfa/{otu}.gfa")
-        elif os.path.exists(f"{pantax_db}/species_graph_info"):
-            paths, nodes_len_npy = read_h5py_file(f"{pantax_db}/species_graph_info/{otu}.h5")
+    log.debug(f"Reading {otu} information...\n")        
+
+    species_gfa_dir = Path(db) / "species_gfa"
+    species_graph_info_dir = Path(db) / "species_graph_info"
+    if species_gfa_dir.exists():
+        paths, nodes_len_npy  = read_gfa(f"{db}/species_gfa/{otu}.gfa")
+    elif species_graph_info_dir.exists():
+        paths, nodes_len_npy = read_h5py_file(f"{db}/species_graph_info/{otu}.h5")
     else:
-        if os.path.exists(f"species_graph_info/{otu}.h5"):
-            paths, nodes_len_npy = read_h5py_file(f"species_graph_info/{otu}.h5")
-        else:
-            paths, nodes_len_npy  = read_gfa(f"{pantax_db}/species_gfa/{otu}.gfa")
-            write_h5py_file(nodes_len_npy, paths, f"species_graph_info/{otu}.h5")
+        raise FileNotFoundError(f"{str(species_gfa_dir)} and {str(species_graph_info_dir)} are not found. No single speices GFA file information.")
+    t1_start = time.perf_counter()
     unique_trio_nodes, unique_trio_nodes_len, hap2unique_trio_nodes_m = trio_nodes_info(paths, nodes_len_npy) 
+    t1_stop = time.perf_counter()
+    log.debug(f"{otu} obtain unique trio node information elapsed time spend: {round(t1_stop-t1_start, 1)} seconds")
     nodes_len = {node:node_len for node, node_len in enumerate(nodes_len_npy)}
-    node_abundances, unique_trio_node_abundances = get_node_abundances_dev(otu, read_group_data[otu], nodes_len, unique_trio_nodes, unique_trio_nodes_len, start) 
+    t1_start = time.perf_counter()
+    node_abundances, unique_trio_node_abundances, node_base_cov, node_base_all = get_node_abundances(otu, nodes_len, unique_trio_nodes, unique_trio_nodes_len, start) 
+    t1_stop = time.perf_counter()
+    log.debug(f"{otu} obtain all node information elapsed time spend: {round(t1_stop-t1_start, 1)} seconds")
     non_zero_count = sum(1 for elem in node_abundances if elem != 0)
-    if is_show_log: print(f"{otu} species node abundance > 0 number:{non_zero_count}\n")
-    otu_paths = list(paths.values())
+    log.debug(f"{otu} species node abundance > 0 number:{non_zero_count}\n")
     haps_id = list(paths.keys())
     nvert = end-start+1      
     otu_abundance_list = [x if x > min_depth else 0 for x in node_abundances]
     if non_zero_count == 0 or max(otu_abundance_list) == 0 :
-        return [(otu, hap_id, 0) for hap_id in haps_id]
+        return [[otu, hap_id]+["-"]*4+[0] for hap_id in haps_id]
     # Now solve the minimization problem  
-    x, objVal = optimize(otu_abundance_list, nvert, otu_paths, minimization_min_cov, min_cov, 
-                         unique_trio_nodes_fraction, unique_trio_nodes_mean_count_fraction,
-                         threads, hap2unique_trio_nodes_m, unique_trio_node_abundances)
-    return [(otu, hap_id, x[i]) for i, hap_id in enumerate(haps_id)]
-
-def read_cls(otu_range_file: str, species_abundance_file: str, min_species_abundance: int = 1e-04) -> Dict[str, List[str]]:
-    """
-    Obtain species filtered for abundance, and then obtain their location information in the reference pangenome.
-    """
-    species_abundance = pd.read_csv(species_abundance_file, sep="\t", dtype={0:str, 1:float, 2:float})
-    species_abundance.columns = ["species_taxid", "abundance", "coverage"]
-    species_abundance = species_abundance[species_abundance["abundance"] > min_species_abundance]
-    otu_list = species_abundance["species_taxid"].tolist()
-    # otu_list = ["1589", "630"]
-    # print(len(otu_list))
-    otu_to_range: Dict[str, List[str]] = {} # [key] = species_taxid, [value] = [start,end] -> the start and end position in reference_pangenome.gfa
-    with open(otu_range_file, "r") as f:
-        for line in f:
-            tokens = line.strip().split("\t")
-            otu = tokens[0]
-            if otu in otu_list:
-                otu_to_range[otu] = [tokens[1], tokens[2]]
-    return otu_to_range
-
-# @timeit
-def read_gfa(graph_name: str, previous: int = 0):
-    """
-    Reads a graph from a GFA-file and returns graph in gt-format.
-    """
-    nodes_len_list: List[int] = []
-    paths: Dict[str, List[int]] = {} # key = haplotype_name, vlaue = [node1, node2, ...]
-    with open(graph_name, "r") as f:
-        i = 0
-        for line in f:
-            if line.startswith("S"):
-                line = line.rstrip('\n').split('\t')              
-                # vertex
-                node_id = int(line[1]) - 1 - previous
-                assert i == node_id
-                i += 1
-                node_len = len(line[2])
-                assert node_len != 0, "Error: Node length 0 appears in the GFA!"
-                nodes_len_list.append(node_len)
-            elif line[0] == "W" or line[0] == "P":
-                reverse_flag = None
-                haplotype_id = None
-                line = line.rstrip('\n').split('\t')
-                # W line               
-                if line[0] == "W":
-                    # haplotype_id = line[1] + "_" + line[3]
-                    haplotype_id = line[1]
-                    if line[-1].startswith("<"):
-                        reverse_flag = True
-                    else:
-                        reverse_flag = False
-                    path = [int(match.group())-1-previous for match in re.finditer(r'-?\d+', line[-1])]
-                # P line
-                elif line[0] == "P":
-                    haplotype_id = line[1].split("#", 1)[0]
-                    if line[2].split(",", 1)[0].endswith("-"):
-                        reverse_flag = True
-                    else:
-                        reverse_flag = False
-                    path = [int(match.group())-1-previous for match in re.finditer(r'\d+', line[2])]
-                else:
-                    continue
-                if reverse_flag:
-                    path = list(reversed(path))
-                # Multiple chromosomes from the same genome merge into one path. 
-                # Although this would introduce two non-existent trio nodes for each additional chromosome, 
-                # it is not worth mentioning that only two nodes are relative to all nodes in the entire graph.
-                if haplotype_id not in paths:
-                    paths[haplotype_id] = path 
-                else:
-                    paths[haplotype_id].extend(path)             
-    return paths, np.array(nodes_len_list)
-
-def abundance_cal(otu_cov: List[Tuple[str, str, Union[int, float]]], genomes_info_file: str) -> None:
-    otu_cov_df = pd.DataFrame(otu_cov, columns=["species_taxid", "hap_id", "predicted_coverage"])
-    sum_coverage = otu_cov_df["predicted_coverage"].sum()
-    otu_cov_df["predicted_abundance"] = otu_cov_df["predicted_coverage"] / sum_coverage
-    dtypes = {"genome_ID": str, "strain_taxid": str}
-    genomes_info = pd.read_csv(genomes_info_file, sep="\t",usecols=[0,1],dtype=dtypes)
-    genomes_info["hap_id"] = genomes_info["genome_ID"].str.split("_").str[:2].str.join("_")
-    new_otu_cov_df = pd.merge(otu_cov_df, genomes_info, on="hap_id", how="left")
-    new_otu_cov_df = new_otu_cov_df.drop("hap_id", axis=1)
-    new_order = ["species_taxid", "strain_taxid", "genome_ID", "predicted_coverage", "predicted_abundance"]
-    new_otu_cov_df = new_otu_cov_df[new_order]
-    new_otu_cov_df = new_otu_cov_df.sort_values(by="predicted_abundance", ascending=False)
-    new_otu_cov_df = new_otu_cov_df[new_otu_cov_df["predicted_abundance"] != 0]
-    new_otu_cov_df.to_csv("strain_abundance.txt", sep="\t", index=False)
-
-def abundace_constraint(otu_mapping_list: List[Tuple[str, str, Union[int, float]]], species_abundance_file: str) -> List[Tuple[str, str, Union[int, float]]]:
-    species_abundance_df = pd.read_csv(species_abundance_file, sep="\t")
-    species_abundance_df.columns = ["species_taxid", "abundance", "avg_coverage"]
-    species_abundance_df["species_taxid"] = species_abundance_df["species_taxid"].astype(str)
-    species_taxid = otu_mapping_list[0][0]
-    strains: List[str] = [] 
-    strains_coverage: List[Union[int, float]] = []
-    for mapping in otu_mapping_list:
-        strains.append(mapping[1])
-        strains_coverage.append(mapping[2])
-    species_coverage = species_abundance_df[species_abundance_df["species_taxid"] == species_taxid]["avg_coverage"].tolist()[0]
-    if max(strains_coverage) > 1.05*species_coverage:
-        factor = species_coverage/sum(strains_coverage)
-        strains_coverage = np.array(strains_coverage)*factor
-        new_otu_mapping_list: List[Tuple[str, str, Union[int, float]]] = []
-        for i in range(len(strains)):
-            new_otu_mapping_list.append((species_taxid, strains[i], strains_coverage[i]))
-        return new_otu_mapping_list
+    result = optimize(otu_abundance_list, nvert, paths, hap2unique_trio_nodes_m, unique_trio_node_abundances, node_base_cov, node_base_all, minimization_min_cov, unique_trio_nodes_fraction, min_cov, unique_trio_nodes_count, gurobi_threads, single_cov_ratio)
+    if result:
+        hap_metrics, objVal = result
+        return [[otu] + _hap_metrics for _hap_metrics in hap_metrics]
     else:
-        return otu_mapping_list
-
-# @timeit
-def trio_nodes_info(paths: Dict[str, List[int]], nodes_len_npy: np.ndarray) -> Tuple[Dict[Tuple[int, int, int], int], List[int], np.ndarray]:
+        return None
+    
+def trio_nodes_info(paths: Dict[str, List[int]], nodes_len_npy: np.ndarray):
     trio_nodes: List[Tuple[int, int, int]] = []
     hap_trio_paths: Dict[str, List[Tuple[int, int, int]]] = {}
     # chop trio nodes for all paths
     for hap, path in paths.items():
+        # trio_path = []
+        # for i in range(len(path)-2):
+        #     if read_type and read_type == "short" and nodes_len_npy[path[i+1]] > 150: continue
+        #     trio_path.append((path[i], path[i+1], path[i+2]))
         trio_path = [(path[i], path[i+1], path[i+2]) for i in range(len(path)-2)]
         hap_trio_paths[hap] = trio_path
         trio_nodes.extend(trio_path)
@@ -303,8 +336,7 @@ def trio_nodes_info(paths: Dict[str, List[int]], nodes_len_npy: np.ndarray) -> T
         hap2unique_trio_nodes_m = np.array([])
     return unique_trio_nodes, unique_trio_nodes_len, hap2unique_trio_nodes_m
 
-# @timeit
-def get_node_abundances_dev(otu: str, reads_info: List[List[str]], nodes_len: Dict[int, int], trio_nodes: Dict[Tuple[int, int, int], int], 
+def get_node_abundances(otu: str, nodes_len: Dict[int, int], trio_nodes: Dict[Tuple[int, int, int], int], 
                             trio_nodes_len: List[int], start: int) -> Tuple[List[int], List[int]]:
     """
     For now we do not consider the insertions and deletions of the nodes. For the start node 
@@ -315,19 +347,24 @@ def get_node_abundances_dev(otu: str, reads_info: List[List[str]], nodes_len: Di
     but don't add the number of insertions(keep node length). 
     Actually, we can consider indels by the cs tag or cg tag in gaf file. 
     """
-    
     bases_per_node = {} # map node IDs to read alignments
+    node_base_cov_info = {}
     for i in range(len(nodes_len)):
         bases_per_node[i] = 0
+        node_base_cov_info[i] = [0, 0, [0]*nodes_len[i]] #start, end, base_cov, is_all_cov
     trio_nodes_bases_count = {}
     for i in range(len(trio_nodes)):
         trio_nodes_bases_count[i] = 0
-    if is_show_log: ("Processing alignments...")
-    for read_info in reads_info:
+    log.debug("Processing alignments...")
+    count = 0
+    for read_info in read_group_data[otu]:
         # read_info -> [read_id, read_path, read_path_len, read_start, read_end]
         read_nodes = [int(match.group())-1-start for match in re.finditer(r'-?\d+', read_info[1])]
         # should keep the insertion order. Python version > 3.7 !!!
-        read_nodes_len_in_graph = {node:nodes_len[node] for node in read_nodes}
+        try:
+            read_nodes_len_in_graph = {node:nodes_len[node] for node in read_nodes}
+        except:
+            print(otu, read_info)
         start_node = read_nodes[0]
         end_node = read_nodes[-1]
         # read_path_len = int(read_info[2])
@@ -337,28 +374,69 @@ def get_node_abundances_dev(otu: str, reads_info: List[List[str]], nodes_len: Di
         target_len = read_end - read_start
         seen = 0
         read_nodes_len = {node:0 for node in read_nodes}
+        undup_read_nodes = set()
         if start_node == end_node and len(read_nodes) == 1:
+            count += 1
             read_nodes_len[start_node] += target_len
             bases_per_node[start_node] += target_len
+            if node_base_cov_info[start_node][0] == 0:
+                for i in range(read_start, read_end):
+                    node_base_cov_info[start_node][2][i] = 1
+                node_cov = sum(node_base_cov_info[start_node][2])
+                node_base_cov_info[start_node][1] = node_cov
+                if node_cov == nodes_len[start_node]:
+                    is_all_cov = 1
+                else:
+                    is_all_cov = 0
+                node_base_cov_info[start_node][0] = is_all_cov
+
         else:
             i = 1
-            for node, node_len in read_nodes_len_in_graph.items():
+            for node in read_nodes:
+                node_len = read_nodes_len_in_graph[node]
                 if i == 1:
                     if node_len < read_start:
-                        print(f"OTU: {otu}, read_id: {read_info[0]}, node_len: {node_len}, read_start:{read_start}")
+                        print(f"OTU: {otu}, read_id: {read_info[0]}, i: {i}, node: {node}, node_len: {node_len}, read_start:{read_start}")
                         print(read_nodes)
                         print(read_nodes_len_in_graph)
                         print(read_nodes_len)                        
                     assert node_len >= read_start
                     node_aln_len = node_len - read_start
-                elif i == len(read_nodes_len_in_graph):
+                    if node_base_cov_info[node][0] == 0:
+                        for j in range(read_start, node_len):
+                            node_base_cov_info[node][2][j] =  1
+
+                elif i == len(read_nodes):
                     if target_len < seen: target_len = seen
                     node_aln_len = target_len - seen
+                    if node_base_cov_info[node][0] == 0:
+                        for j in range(0, node_aln_len - 1):
+                            try:
+                                node_base_cov_info[node][2][j] =  1
+                            except:
+                                print(len(node_base_cov_info[node][2]), node_aln_len, j)
+                                print(f"OTU: {otu}, read_id: {read_info[0]}, i: {i}, node: {node}, node_len: {node_len}, read_start:{read_start}")
+                                print(read_nodes)
+                                print(read_nodes_len_in_graph)
+                                print(read_nodes_len)
+                                raise IndexError
                 else:
                     node_aln_len = node_len
+                    if node_base_cov_info[node][0] == 0:
+                        for j in range(0, node_aln_len):
+                            node_base_cov_info[node][2][j] =  1
+                node_cov = sum(node_base_cov_info[node][2])
+                node_base_cov_info[node][1] = node_cov
+                if node_cov == nodes_len[node]:
+                    is_all_cov = 1
+                else:
+                    is_all_cov = 0
+                node_base_cov_info[node][0] = is_all_cov
                 seen += node_aln_len
-                read_nodes_len[node] += node_aln_len
-                bases_per_node[node] += node_aln_len
+                if node not in undup_read_nodes:
+                    read_nodes_len[node] += node_aln_len
+                    bases_per_node[node] += node_aln_len
+                    undup_read_nodes.add(node)
                 i += 1
         if len(read_nodes) < 3:
             continue
@@ -380,7 +458,7 @@ def get_node_abundances_dev(otu: str, reads_info: List[List[str]], nodes_len: Di
                     continue
             trio_nodes_bases_count[idx] += read_trio_nodes_len[i]       
     node_abundance_list: List[int] = []
-    if is_show_log: print("Computing node abundance rates...")
+    log.debug("Computing node abundance rates...")
     for node, node_len in nodes_len.items():
         aligned_len = bases_per_node[node]
         if node_len > 0:
@@ -389,7 +467,7 @@ def get_node_abundances_dev(otu: str, reads_info: List[List[str]], nodes_len: Di
             raise ZeroDivisionError(f"Node length 0 for node {node}")
         node_abundance_list.append(node_abundance)
     trio_node_abundance_list: List[int] = []
-    if is_show_log: print("Computing trio node abundance rates...")
+    log.debug("Computing trio node abundance rates...")
     for i, trio_node_len in enumerate(trio_nodes_len):
         aligned_len = trio_nodes_bases_count[i]
         if trio_node_len > 0:
@@ -397,232 +475,347 @@ def get_node_abundances_dev(otu: str, reads_info: List[List[str]], nodes_len: Di
         else:
             raise ZeroDivisionError(f"Trio node length 0 for node {node}")
         trio_node_abundance_list.append(node_abundance)
-    return node_abundance_list, trio_node_abundance_list
 
-# @timeit
-def optimize(a: List[int], nvert: int, paths: List[List[int]], min_cov: int, min_cov_final: float, 
-             unique_trio_nodes_fraction: float, unique_trio_nodes_mean_count_fraction: float, 
-             threads: int, hap2trio_nodes_m: np.ndarray, trio_node_abundances: List[int]) -> Tuple[List[Union[int, float]], Union[int, float]]:
-    """
-    Defines Gurobi minimization problem and then applies the LP solver.
-    Returns the solution values, the corresponding objective value, and a matrix
-    counting pairwise differences between haplotypes.
-    """
-    t1_start = time.perf_counter()
-    t2_start = time.process_time()
-    origin_paths_len = len(paths)
-    max_strains = origin_paths_len
-    trio_node_abundances = np.array(trio_node_abundances)
-    same_path_flag = False
-    if origin_paths_len != 1 and hap2trio_nodes_m.size:
-        possible_strains_frequencies_mean = []
+    node_base_cov = np.array([value[1] for value in node_base_cov_info.values()])
+    node_base_all = np.array(list(nodes_len.values()))
+    return node_abundance_list, trio_node_abundance_list, node_base_cov, node_base_all
+
+def optimize(
+        a: List[int], nvert: int, paths: Dict[str, List[int]], 
+        hap2trio_nodes_m: np.ndarray, trio_node_abundances: List[int], node_base_cov, node_base_all,
+        minimization_min_cov, unique_trio_nodes_fraction, min_cov, unique_trio_nodes_count, gurobi_threads, single_cov_ratio
+        ):
+        """
+        Defines Gurobi minimization problem and then applies the LP solver.
+        Returns the solution values, the corresponding objective value, and a matrix
+        counting pairwise differences between haplotypes.
+        """
+        max_strains = origin_paths_len = len(paths)
+        if mode == "single" and origin_paths_len != 1:
+            return None
+        elif mode == "double" and origin_paths_len == 1:
+            return None
+
+        t1_start = time.perf_counter()
+        t2_start = time.process_time()
+        # set default value
+        otu_paths = list(paths.values())
+        haps_id = list(paths.keys())    
+        hap_metrics = [[_hap]+["-"]*5+[0]+["-"] for _hap in haps_id]
+        trio_node_abundances = np.array(trio_node_abundances)
+        size = hap2trio_nodes_m.size
+        same_path_flag = False
         possible_strains_idx = []
-        row_sums = np.sum(hap2trio_nodes_m, axis=1)
-        for idx in range(len(paths)):
-            selected_indices = np.where((hap2trio_nodes_m[:, idx] == 1) & (row_sums == 1))[0]
-            if len(selected_indices) == 0: continue
-            frequencies = np.zeros(len(trio_node_abundances))
-            frequencies[selected_indices] = trio_node_abundances[selected_indices]
-            count_greater_than_zero = np.sum(frequencies > 0)
-            if is_show_log: print(f"\t\tTrio node abundance > 0 ratio: {count_greater_than_zero}/{len(selected_indices)}")
-            if count_greater_than_zero/len(selected_indices) < unique_trio_nodes_fraction: continue
-            possible_strains_idx.append(idx)
-            non_zero_frequencies = frequencies[frequencies > 0]
+        possible_strains_frequencies_mean = []
+        
+        if origin_paths_len != 1 and size:
+            row_sums = np.sum(hap2trio_nodes_m, axis=1)
+            for idx in range(len(haps_id)):
+                selected_indices = np.where((hap2trio_nodes_m[:, idx] == 1) & (row_sums == 1))[0]
+                if len(selected_indices) == 0: continue
+                frequencies = np.zeros(len(trio_node_abundances))
+                frequencies[selected_indices] = trio_node_abundances[selected_indices]
+                count_greater_than_zero = np.sum(frequencies > 0)
+                otu_unique_trio_nodes_fraction = count_greater_than_zero/len(selected_indices)
+                hap_metrics[idx][1] = round(otu_unique_trio_nodes_fraction, 2)
+                if shift:
+                    non_zero_frequencies = frequencies[frequencies > 0]
+                    non_zero_frequencies = filter_outliers(non_zero_frequencies, method='zscore')    
+                    frequencies_mean = np.mean(non_zero_frequencies) if len(non_zero_frequencies) > 0 else 0
+                    if frequencies_mean >= 1:
+                        shift_unique_trio_nodes_fraction = unique_trio_nodes_fraction + (0.8-unique_trio_nodes_fraction)*frequencies_mean/100
+                        if shift_unique_trio_nodes_fraction >= 0.8:
+                            shift_unique_trio_nodes_fraction = 0.8
+                    else:
+                        shift_unique_trio_nodes_fraction = unique_trio_nodes_fraction*frequencies_mean
+                    if verbose: print(f"\t\t{haps_id[idx]} unique trio node abundance > 0 ratio: {otu_unique_trio_nodes_fraction}, shift unique trio nodes fraction: {shift_unique_trio_nodes_fraction}, frequencies mean: {frequencies_mean}")
+                    if otu_unique_trio_nodes_fraction < shift_unique_trio_nodes_fraction: continue
+                    possible_strains_idx.append(idx)
+                    possible_strains_frequencies_mean.append(frequencies_mean)
+                    hap_metrics[idx][2] = round(frequencies_mean, 2)
+                    
+                else:
+                    if verbose: print(f"\t\t{haps_id[idx]} unique trio node abundance > 0 ratio: {otu_unique_trio_nodes_fraction}")
+                    if otu_unique_trio_nodes_fraction < unique_trio_nodes_fraction: continue
+                    non_zero_frequencies = frequencies[frequencies > 0]
+                    non_zero_frequencies = filter_outliers(non_zero_frequencies, method='zscore')
+                    # np.save(f"{haps_id[idx]}_non_zero_frequencies.npy", non_zero_frequencies)
+                    frequencies_mean = np.mean(non_zero_frequencies) if len(non_zero_frequencies) > 0 else 0
+                    possible_strains_idx.append(idx)
+                    possible_strains_frequencies_mean.append(frequencies_mean)
+                    hap_metrics[idx][2] = round(frequencies_mean, 2)
+                    
+            if verbose: print("\t\tFisrt filter #strains / #paths = {} / {}".format(len(possible_strains_idx), origin_paths_len))
+            otu_paths = [otu_paths[idx] for idx in possible_strains_idx]
+        elif origin_paths_len != 1 and size == 0:
+            if all(x == otu_paths[0] for x in otu_paths):
+                otu_paths = [otu_paths[0]]
+                same_path_flag = True
+                node_abundance = np.array(a)
+                non_zero_frequencies = node_abundance[node_abundance > 0]
+                frequencies_mean = np.mean(non_zero_frequencies) if len(non_zero_frequencies) > 0 else 0
+                possible_strains_frequencies_mean.append(frequencies_mean)                
+                possible_strains_idx = [0]
+            else:
+                possible_strains_idx = [_i for _i in range(origin_paths_len)]
+                # raise ValueError(f"{origin_paths_len} more than 1, but have trio node is None.")
+        elif origin_paths_len == 1:
+            node_abundance = np.array(a)
+            non_zero_frequencies = node_abundance[node_abundance > 0]
             frequencies_mean = np.mean(non_zero_frequencies) if len(non_zero_frequencies) > 0 else 0
             possible_strains_frequencies_mean.append(frequencies_mean)
-        if is_show_log: print("\t\tFisrt filter #strains / #paths = {} / {}".format(len(possible_strains_idx), origin_paths_len))
-        paths = [paths[idx] for idx in possible_strains_idx]
-    # else:
-    #     possible_strains_idx = [0]
-    elif origin_paths_len != 1 and hap2trio_nodes_m.size == 0:
-        if all(x == paths[0] for x in paths):
-            paths = [paths[0]]
-            same_path_flag = True
-    # t_stop = time.perf_counter()
-    # print("     [PAO first filter based on fr] - Elapsed time: {:.1f} seconds".format(t_stop-t1_start))
+            possible_strains_idx = [0]
 
-    # absolute error
-    m = Model('lp')
-    obj = LinExpr()
+        # t_stop = time.perf_counter()
+        # print("     [PAO first filter based on fr] - Elapsed time: {:.1f} seconds".format(t_stop-t1_start))
 
-    npaths = len(paths)          #The number of feasible paths
-    P = np.zeros((nvert,npaths))
-    x = m.addVars(list(range(npaths)), lb=0, ub=1.05*max(a), vtype=GRB.CONTINUOUS, name='x')
-    X = [x[i] for i in range(npaths)]
-    X = np.array([X]).reshape(npaths,1)    #Set x in an array for multiplication
-    nvert_list = list(range(nvert))
-    
-    if sample:
-        if len(nvert_list) > 500:
-            sample_nodes = random.sample(nvert_list, 500)
-            sample_nodes = sorted(sample_nodes)
-            nvert_list = sample_nodes
+        # absolute error
+        m = Model('lp')
+        obj = LinExpr()
+        npaths = len(otu_paths)          #The number of feasible paths
+        P = np.zeros((nvert,npaths))
+        x = m.addVars(list(range(npaths)), lb=0, ub=1.05*max(a), vtype=GRB.CONTINUOUS, name='x')
+        X = [x[i] for i in range(npaths)]
+        X = np.array([X]).reshape(npaths,1)    #Set x in an array for multiplication
+        nvert_list = list(np.where(np.array(a) > 0)[0])
+        non_zero_nvert_list_len = len(nvert_list)
+        # nvert_list = list(range(nvert))
 
-    # If objective involves absolute values, add extra variables
-    y = m.addVars(nvert_list, lb=0, vtype=GRB.CONTINUOUS, name='y')
-    # add indicator variables to count strains
-    if max_strains > 0:
-        # add indicator variables for counting strains
-        x_binary = m.addVars(list(range(npaths)), vtype=GRB.BINARY, name='strain_indicator')
+        # Store paths in P: p_ij = 1 if node i contains path j
+        # print('\nSave for every node which paths are passing through:')
         for i in range(npaths):
-            max_x = 2*max(a)
-            m.addConstr(x_binary[i] >= (x[i]-min_cov)/max_x)
-        # define total strain count
-        sum_x_binary = LinExpr()
-        for i in range(npaths):
-            sum_x_binary += x_binary[i]
-        # bound the number of strains
-        m.addConstr(sum_x_binary <= max_strains)
+            # node_abundance = []
+            for v in otu_paths[i]:
+                P[int(v),i] = 1
+                # node_abundance.append(a[v])
+            # np.save(f"{haps_id[i]}_node_abundance.npy", node_abundance)
+                # if self.mode == "single":
+                #     node_abundance.append(a[v])
+        # log.debug(f"pangenome eq1 node abundance: {node_abundance}")
 
-    # Store paths in P: p_ij = 1 if node i contains path j
-    # print('\nSave for every node which paths are passing through:')
-    # for i in tqdm(range(npaths)):
-    for i in range(npaths):
-        for v in paths[i]:
-            P[int(v),i] = 1
-    npaths = len(paths)
-    del paths
-    m.update()
-
-    # Define the objective function
-    # print('\nDefine the objective function:')
-    n_eval = 0
-    # for v in tqdm(range(nvert)):
-    for v in range(nvert):
-        if sample:
-            if v not in nvert_list: continue
-        # sum the calculated abundances of strains through v
-        # sum_xv = 0
-        # for idx, i in enumerate(P[v]):
-        #     if i == 1:
-        #         sum_xv += x[idx]
-
-        # memory may be expensive!!!
-        sum_xv = np.dot(P[v,:],X)[0]
-        abundance = a[v]
-        if abundance == 0:
-            continue
-        # absolute difference
-        obj += y[v] #abs(abundance - sum_xv)
-        # set constraints on y[v] to obtain absolute value
-        m.addConstr(y[v] >= sum_xv - abundance, "y_{}_-".format(v))
-        m.addConstr(y[v] >= abundance - sum_xv, "y_{}_+".format(v))
-        n_eval += 1
-    assert n_eval > 0
-    
-    obj *= (1/n_eval)
-    # set objective and minimize
-    m.setObjective(obj, GRB.MINIMIZE)
-    # print("Objective function ready, starting Gurobi optimization:")
-    # print()
-    m.update()
-
-    m.Params.LogToConsole = 0
-    m.Params.Threads = threads
-    m.Params.NumericFocus = 0
-    m.Params.PoolSearchMode = 0
-    m.Params.PoolSolutions = 10
-    m.Params.Method = 4
-
-    #Minimize the model for the given objective function and constraints
-    if is_show_log: print("\t\t*** Phase 1 optimization***")
-    m.optimize()
-
-    # print("Number of solutions = {}".format(m.solcount))
-    if m.status == GRB.Status.OPTIMAL:
-        x_sol = []
-        for v in m.getVars():
-            if 'x' in v.varName:
-                x_sol.append(v.x)
-        if is_show_log: print(f"\t\tObjective value: {m.objVal}")
-        objVal = m.objVal
-        if is_show_log: print(f"\t\tFirst sol:{x_sol}\n")
-        selected_strains = [1 if cov > min_cov_final else 0 for cov in x_sol]
-        nstrains = sum(selected_strains)
-        if is_show_log: print("\t\tFirst optimization #strains / #paths = {} / {}".format(nstrains, npaths))
-
-        if origin_paths_len == 1:
-            if x_sol[0] < min_cov_final:
-                x_sol[0] = 0
-            return x_sol, objVal
-        elif origin_paths_len != 1 and hap2trio_nodes_m.size == 0:
-            if same_path_flag:
-                if x_sol[0] < min_cov_final:
-                    x_sol[0] = 0  
-                sol = [0] * origin_paths_len 
-                sol[0] = x_sol[0]    
-                x_sol = sol         
-            else:
-                for i in range(len(x_sol)):
-                    if x_sol[i] < min_cov_final: x_sol[i] = 0
-            return x_sol, objVal
+        path_cov = np.dot(node_base_cov, P)
+        path_all_cov = np.dot(node_base_all, P)
+        for _i, _x in enumerate(path_cov):
+            ori_idx = possible_strains_idx[_i]
+            hap_metrics[ori_idx][3] = _x / path_all_cov[_i]
         
-        for idx, frequencies_mean in enumerate(possible_strains_frequencies_mean):
-            if frequencies_mean == 0:
-                selected_strains[idx] = 0
-                continue
-            f = abs(x_sol[idx]-frequencies_mean)/(x_sol[idx]+frequencies_mean)
-            if is_show_log: print(f"\t\tidx:{idx}\tfrequencies_mean:{frequencies_mean}\txsol:{x_sol[idx]}\tf:{f}")
-            if f > unique_trio_nodes_mean_count_fraction:
-                selected_strains[idx] = 0
-       
-        nstrains = sum(selected_strains)
-        if is_show_log: print("\t\tSecond filter #strains / #paths = {} / {}".format(nstrains, npaths))
+        random.seed(42)
+        if sample_test:
+            if non_zero_nvert_list_len > 500:
+                sample_nodes = random.sample(nvert_list, 500)
+                sample_nodes = sorted(sample_nodes)
+                nvert_list = sample_nodes
+        if not sample_test and sample:
+            if non_zero_nvert_list_len > sample:
+                log.debug(f"The graph has too many nodes. Subsample {sample}.")
+                sample_nodes = random.sample(nvert_list, sample)
+                sample_nodes = sorted(sample_nodes)
+                nvert_list = sample_nodes
+        # print(nvert_list[:10])
+        # If objective involves absolute values, add extra variables
+        y = m.addVars(nvert_list, lb=0, vtype=GRB.CONTINUOUS, name='y')
+        # log.debug(f"nvert len:{len(nvert_list)}\ty len:{len(y)}")
+        # add indicator variables to count strains
+        if max_strains > 0:
+            # add indicator variables for counting strains
+            x_binary = m.addVars(list(range(npaths)), vtype=GRB.BINARY, name='strain_indicator')
+            for i in range(npaths):
+                max_x = 2*max(a)
+                m.addConstr(x_binary[i] >= (x[i]-minimization_min_cov)/max_x)
+            # define total strain count
+            sum_x_binary = LinExpr()
+            for i in range(npaths):
+                sum_x_binary += x_binary[i]
+            # bound the number of strains
+            m.addConstr(sum_x_binary <= max_strains)
 
-        # run phase 2 optimization:
-        if is_show_log: print("\t\t*** Phase 2 optimization***")
-        m.reset()
-        for i in range(npaths):
-            if selected_strains[i] == 0:
-                m.addConstr(x[i] == 0)
+        del otu_paths, hap2trio_nodes_m, trio_node_abundances, path_cov, path_all_cov
+        m.update()
+        # Define the objective function
+        # print('\nDefine the objective function:')
+        n_eval = 0
+        # for v in tqdm(range(nvert)):
+        # nvert_list = deque(nvert_list)
+        # for v in range(nvert):
+        #     if (sample_test or sample) and nvert_list:
+        #         # if v not in nvert_list: continue
+        #         if v == nvert_list[0]:
+        #             nvert_list.popleft()
+        #         else:
+        #             continue
+        for v in nvert_list:
+            # sum the calculated abundances of strains through v
+            # sum_xv = 0
+            # for idx, i in enumerate(P[v]):
+            #     if i == 1:
+            #         sum_xv += x[idx]
+
+            # memory may be expensive!!!
+            sum_xv = np.dot(P[v,:],X)[0]
+            abundance = a[v]
+            if abundance == 0:
+                continue
+            # absolute difference
+            obj += y[v] #abs(abundance - sum_xv)
+            # set constraints on y[v] to obtain absolute value
+            m.addConstr(y[v] >= sum_xv - abundance, "y_{}_-".format(v))
+            m.addConstr(y[v] >= abundance - sum_xv, "y_{}_+".format(v))
+            n_eval += 1
+
+        assert n_eval > 0
+        
+        obj *= (1/n_eval)
+        # set objective and minimize
+        m.setObjective(obj, GRB.MINIMIZE)
+        # print("Objective function ready, starting Gurobi optimization:")
+        # print()
+        m.update()
+
+        m.Params.LogToConsole = 0
+        m.Params.Threads = gurobi_threads
+        m.Params.NumericFocus = 0
+        m.Params.PoolSearchMode = 0
+        m.Params.PoolSolutions = 10
+        m.Params.Method = 4
+
+        #Minimize the model for the given objective function and constraints
+        if verbose: print("\t\t*** Phase 1 optimization***")
         m.optimize()
 
-        x_final = []
-        for v in m.getVars():
-            if 'x' in v.varName:
-                x_final.append(v.x)
-        if is_show_log: print(f"\t\tObjective value: {m.objVal}")
-        objVal = m.objVal
+        # print("Number of solutions = {}".format(m.solcount))
+        if m.status == GRB.Status.OPTIMAL:
+            x_sol = []
+            for v in m.getVars():
+                if 'x' in v.varName:
+                    x_sol.append(v.x)
+            if verbose: print(f"\t\tObjective value: {m.objVal}")
+            objVal = m.objVal
+            if verbose: print(f"\t\tFirst sol:{x_sol}\n")
+            selected_strains = [1 if cov > 0 else 0 for cov in x_sol]
+            nstrains = sum(selected_strains)
+            for _i, _x in enumerate(x_sol):
+                ori_idx = possible_strains_idx[_i]
+                hap_metrics[ori_idx][4] = _x
 
-        selected_strains = [1 if cov > min_cov_final else 0 for cov in x_final]
-        nstrains = sum(selected_strains)
-        if is_show_log: print("\t\tSecond optimization #strains / #paths = {} / {}".format(nstrains, npaths))
+            if verbose: print("\t\tFirst optimization #strains / #paths = {} / {}".format(nstrains, npaths))
+            
+            if origin_paths_len != 1 and size:            
+                for idx, frequencies_mean in enumerate(possible_strains_frequencies_mean):
+                    if frequencies_mean == 0:
+                        selected_strains[idx] = 0
+                        continue
+                    f = abs(x_sol[idx]-frequencies_mean)/(x_sol[idx]+frequencies_mean)
+                    ori_idx = possible_strains_idx[idx]
+                    hap_metrics[ori_idx][5] = f = round(f, 2)
+                    if verbose: print(f"\t\t{haps_id[ori_idx]}\tfrequencies_mean:{frequencies_mean}\txsol:{x_sol[idx]}\tf:{f}")
+                    if f > unique_trio_nodes_count:
+                        if f <= 0.6: 
+                            this_strain_single_cov_ratio =  hap_metrics[ori_idx][1] * hap_metrics[ori_idx][3]
+                            if this_strain_single_cov_ratio < single_cov_ratio or x_sol[idx] == 0:
+                                selected_strains[idx] = 0
+                            else:
+                                hap_metrics[ori_idx][7] = True
+                        else:
+                            selected_strains[idx] = 0
+                        # if single_species:
+                        #     this_strain_single_cov_ratio =  hap_metrics[ori_idx][1] * hap_metrics[ori_idx][3]
+                        #     if this_strain_single_cov_ratio < single_cov_ratio or x_sol[idx] == 0:
+                        #         selected_strains[idx] = 0
+                        #     else:
+                        #         hap_metrics[ori_idx][7] = True
+                        # else:    
+                        #     selected_strains[idx] = 0
+            elif (origin_paths_len != 1 and size == 0 and same_path_flag) or origin_paths_len == 1: 
+                frequencies_mean = possible_strains_frequencies_mean[0]
+                if frequencies_mean:   
+                    f = abs(x_sol[0]-frequencies_mean)/(x_sol[0]+frequencies_mean)
+                    if verbose: print(f"\t\tidx:{haps_id[0]}\tfrequencies_mean:{frequencies_mean}\txsol:{x_sol[0]}\tf:{f}")
+                    hap_metrics[0][5] = round(f, 2)
+                    hap_metrics[0][6] = hap_metrics[0][4]
+                return hap_metrics, objVal
+            elif origin_paths_len != 1 and size == 0 and not same_path_flag:
+                for _i in range(origin_paths_len):
+                    ori_idx = possible_strains_idx[_i]
+                    hap_metrics[ori_idx][6] = hap_metrics[ori_idx][4]
+                return hap_metrics, objVal                
+        
+            nstrains = sum(selected_strains)
+            if verbose: print("\t\tSecond filter #strains / #paths = {} / {}".format(nstrains, npaths))
 
-        sol = [0] * origin_paths_len
-        i = 0
-        for idx in range(len(sol)):
-            if idx in possible_strains_idx:
-                sol[idx] = x_final[i]
-                i += 1
+            # run phase 2 optimization:
+            if verbose: print("\t\t*** Phase 2 optimization***")
+            m.reset()
+            for i in range(npaths):
+                if selected_strains[i] == 0:
+                    m.addConstr(x[i] == 0)
+            m.optimize()
 
-        t1_stop = time.perf_counter()
-        t2_stop = time.process_time()
-        if is_show_log: 
-            print("\nStrain path optimize completed")
-            print("Elapsed time: {:.1f} seconds".format(t1_stop-t1_start))
-            print("CPU process time: {:.1f} seconds\n".format(t2_stop-t2_start))
-        return sol, objVal
+            x_final = []
+            for v in m.getVars():
+                if 'x' in v.varName:
+                    x_final.append(v.x)
+            if verbose: print(f"\t\tObjective value: {m.objVal}")
+            objVal = m.objVal
 
+            # selected_strains = [1 if cov > self.min_cov else 0 for cov in x_final]
+            nstrains = sum(selected_strains)
+            if verbose: print("\t\tSecond optimization #strains / #paths = {} / {}".format(nstrains, npaths))
+
+            for _i, _x in enumerate(x_final):
+                ori_idx = possible_strains_idx[_i]
+                hap_metrics[ori_idx][6] = _x
+
+            t1_stop = time.perf_counter()
+            t2_stop = time.process_time()
+            if verbose: 
+                print("\nStrain path optimize completed")
+                print("Elapsed time: {:.1f} seconds".format(t1_stop-t1_start))
+                print("CPU process time: {:.1f} seconds\n".format(t2_stop-t2_start))
+            return hap_metrics, objVal
+
+        else:
+            try:
+                m.computeIIS()
+                # Print the names of all of the constraints in the IIS set.
+                print("IIS constraints:")
+                for c in m.GetConstrs():
+                    if c.Get(GRB.IntAttr.IISConstr) > 0:
+                        print(c.Get(GRB.StringAttr.ConstrName))
+                # Print the names of all of the variables in the IIS set.
+                print("IIS variables:")
+                for v in m.GetVars():
+                    if v.Get(GRB.IntAttr.IISLB) > 0 or v.Get(GRB.IntAttr.IISUB) > 0:
+                        print(v.Get(GRB.StringAttr.VarName))
+                print("ERROR: Infeasible model.")
+            except:
+                #print(m.getAttr(GRB.Attr.UnbdRay, m.getVars()))
+                print("ERROR: Unbounded model.")
+
+            print('\nNo optimal solution found, exiting.')
+            sys.exit(1)
+
+def filter_outliers(data, method='iqr', threshold=3):
+    if data.size == 0:
+        return []
+    if np.isnan(data).any():
+        raise ValueError("Input data contains NaN values.")
+    if method == 'zscore':
+        mean = np.mean(data)
+        std = np.std(data)
+        if std == 0:
+            # print("Warning: Standard deviation is zero. Returning empty list.")
+            return []
+        else:
+            return [x for x in data if abs((x - mean) / std) < threshold]
+    elif method == 'iqr':
+        q1 = np.percentile(data, 25)
+        q3 = np.percentile(data, 75)
+        iqr = q3 - q1
+        lower_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
+        return [x for x in data if lower_bound <= x <= upper_bound]
     else:
-        try:
-            m.computeIIS()
-            # Print the names of all of the constraints in the IIS set.
-            print("IIS constraints:")
-            for c in m.GetConstrs():
-                if c.Get(GRB.IntAttr.IISConstr) > 0:
-                    print(c.Get(GRB.StringAttr.ConstrName))
-            # Print the names of all of the variables in the IIS set.
-            print("IIS variables:")
-            for v in m.GetVars():
-                if v.Get(GRB.IntAttr.IISLB) > 0 or v.Get(GRB.IntAttr.IISUB) > 0:
-                    print(v.Get(GRB.StringAttr.VarName))
-            print("ERROR: Infeasible model.")
-        except:
-            #print(m.getAttr(GRB.Attr.UnbdRay, m.getVars()))
-            print("ERROR: Unbounded model.")
-
-        print('\nNo optimal solution found, exiting.')
-        sys.exit(1)
+        raise ValueError("Invalid method. Choose 'zscore' or 'iqr'.")
 
 
 if __name__ == "__main__":

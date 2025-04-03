@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import sys, os, argparse, subprocess, shutil
+import sys, os, argparse, subprocess, shutil, gzip
 from toolkits import Logger
 import concurrent.futures
 
@@ -11,8 +11,13 @@ def main():
     parser.add_argument("-o", "--output_database", dest="output_database", default="complete_genome_without_plasmid", type=str, help="Output complete genomes database path")
     parser.add_argument("-s", "--summary_file", dest="summary_file_path", default="assembly_summary_bacteria.txt", type=str, help="Assembly summary file path")
     parser.add_argument("-g", "--output_genomes_info", dest="output_genomes_info", type=str, help="Output genomes information file")
+    # parser.add_argument("-l", "--genome_assembly_lvl", dest="genome_assembly_lvl", default="complete", type=str, help="Genome assembly level.(all/complete).")
+    # parser.add_argument("-p", "--cluster", dest="species_cluster", default="all", type=str, help="Species cluster.")
     parser.add_argument("-c", "--custom", dest="custom_complete_genomes", default="custom_complete_genomes.txt", type=str, help="Specify custom complete genomes database(use without -r -s). Format: genomeID\tstrain_taxid\tspecies_taxid\ttorganism_name\tid.")
     parser.add_argument("--remove", dest="remove", default=True, type=bool, help="Wether to remove plasmid")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     args = parser.parse_args()
     print("\nProgram settings:\n")
     for arg in vars(args):
@@ -97,6 +102,12 @@ def read_complete_genome(summary_file_path, Refseq_database_path):
     complete_genomes_path = list(set(complete_genomes_path))
     return complete_genomes_path
 
+def open_file(file_path):
+    if file_path.endswith(".gz"):
+        return gzip.open(file_path, "rt")
+    else:
+        return open(file_path, "r")
+
 def extract_complete_sequence(genome_info):
     """remove plasmids"""
     genome_file = genome_info[0]
@@ -107,7 +118,7 @@ def extract_complete_sequence(genome_info):
             all_sequence = {}
             sequence_name = None
             sequence = []
-            with open(genome_file, "r") as file:
+            with open_file(genome_file) as file:
                 for line in file:
                     line = line.strip()
                     if line.startswith(">"):

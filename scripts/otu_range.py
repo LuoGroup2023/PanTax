@@ -3,15 +3,17 @@ import sys, os, subprocess, argparse, re
 import pandas as pd
 from typing import Dict, List
 import concurrent.futures
+from pathlib import Path
 
 usage = "Find OTU node range in reference pangenome graph"
 
 class OtuRangeProcessor:
 
-    def __init__(self, input_file: str, genomes_info: str, extract_hap_paths_file: str):
+    def __init__(self, input_file: str, genomes_info: str, extract_hap_paths_file: str, threads: int):
         self.input_file = input_file
         self.genomes_info = genomes_info
         self.extract_hap_paths_file = extract_hap_paths_file
+        self.threads = threads
         self.flag = self.hap_line_start_in_gfa()
         self.taxid_to_index = None
 
@@ -142,7 +144,7 @@ class OtuRangeProcessor:
 
     def parallel(self, flag: str) -> Dict[str, List[int]]:
         result_dict = {}
-        with concurrent.futures.ProcessPoolExecutor() as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=self.threads) as executor:
             futures = {executor.submit(self.get_otu_nodeID_range, key, value): key for key, value in self.taxid_to_index.items()}
             for future in concurrent.futures.as_completed(futures):
                 try:
@@ -155,32 +157,116 @@ class OtuRangeProcessor:
         # print(result_dict)
         return result_dict
 
+def get_node_count(vg_file, vg):
+    """
+    Function to process a single VG file.
+    """
+    command = f"{vg} stats -N {vg_file}"
+    try:
+        result = subprocess.run(command, shell=True, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        node_count = result.stdout.strip()
+        species = Path(vg_file).stem
+        return vg_file, species, node_count
+    except subprocess.CalledProcessError as e:
+        print(f"{command} failed: {e.stderr.strip()}")
+        return vg_file, None, None
+
+def get_node_counts_from_vg_files(vg_files_list, vg, max_threads):
+    """
+    Use multithreading to get node counts from VG files and ensure the results follow the input file order.
+    """
+    species_to_node_count = {}
+    with open(vg_files_list, "r") as f:
+        vg_files = f.readline().strip().split(" ")
+
+    results = [None] * len(vg_files)
+
+    # Use a thread pool to process files concurrently
+    with concurrent.futures.ThreadPoolExecutor(max_threads) as executor:
+        future_to_index = {executor.submit(get_node_count, vg_file, vg): i for i, vg_file in enumerate(vg_files)}
+        for future in concurrent.futures.as_completed(future_to_index):
+            index = future_to_index[future]
+            _, species, node_count = future.result()
+            results[index] = (species, node_count)
+    # Build the dictionary in the same order as the input file
+    for (species, node_count) in results:
+        if species and node_count:
+            species_to_node_count[species] = int(node_count)
+
+    return species_to_node_count
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="python otu_range.py", description=usage)
-    parser.add_argument("reference_pangenome_gfa", type=str, help="Reference pangenome GFA file")
-    parser.add_argument("genomes_info", type=str, help="Genomes information file")
-    parser.add_argument("--species-level", dest="species_flag", action="store_true", help="OTU(species) level range. on(1)/off(0)")
-    parser.add_argument("--strain-level", dest="strain_flag", action="store_true", help="OTU(species) level range. on(1)/off(0)")
-    args = parser.parse_args()
-    print("\nProgram settings:\n")
-    for arg in vars(args):
-        print(arg, "=", getattr(args, arg))
-    print()
-    extract_hap_paths_file = "extract_hap_paths.gfa"    
-    otu_range_processor = OtuRangeProcessor(args.reference_pangenome_gfa, args.genomes_info, extract_hap_paths_file)
-    otu_range_processor.extract_hap_paths()
-    if args.species_flag:
-        species_to_genomes = otu_range_processor.get_species_to_genomes_info()
-        otu_range_processor.OTU_to_hap(species_to_genomes)
-        result_dict = otu_range_processor.parallel(flag="species")
+    if len(sys.argv) > 7:
+        parser.add_argument("reference_pangenome_gfa", type=str, help="Reference pangenome GFA file")
+        parser.add_argument("genomes_info", type=str, help="Genomes information file")
+        parser.add_argument("pangenome_ge2", type=str, help="Pangenome ge2")
+        parser.add_argument("pangenome_eq1", type=str, help="Pangenome eq1")
+        parser.add_argument("--species-level", dest="species_flag", action="store_true", help="OTU(species) level range. on(1)/off(0)")
+        parser.add_argument("--strain-level", dest="strain_flag", action="store_true", help="OTU(species) level range. on(1)/off(0)")
+        parser.add_argument("-t", "--threads", dest="threads", type=int, default=64, help="Set number of threads.")
+        args = parser.parse_args()
+        # print("\nProgram settings:\n")
+        # for arg in vars(args):
+        #     print(arg, "=", getattr(args, arg))
+        # print()
+        extract_hap_paths_file = "extract_hap_paths.gfa"    
+        otu_range_processor = OtuRangeProcessor(args.reference_pangenome_gfa, args.genomes_info, extract_hap_paths_file, args.threads)
+        otu_range_processor.extract_hap_paths()
+        if args.species_flag:
+            species_to_genomes = otu_range_processor.get_species_to_genomes_info()
+            otu_range_processor.OTU_to_hap(species_to_genomes)
+            result_dict = otu_range_processor.parallel(flag="species")
+            pangenome_ge2 = set(pd.read_csv(args.pangenome_ge2, header=None, dtype=object).iloc[:,0].tolist())
+            try:
+                pangenome_eq1 = set(pd.read_csv(args.pangenome_eq1, header=None, dtype=object).iloc[:, 0].tolist())
+            except pd.errors.EmptyDataError:
+                # print(f"Warning: The file {args.pangenome_eq1} is empty.")
+                pangenome_eq1 = set()
+            with open("species_range.txt", "w") as f:
+                for key, value in result_dict.items():
+                    if key in pangenome_ge2:
+                        flag = 1
+                    elif key in pangenome_eq1:
+                        flag = 0
+                    else:
+                        print(key)
+                    f.write(f"{key}\t{value[0]}\t{value[1]}\t{flag}\n")
+        if args.strain_flag:
+            strain_to_genomes = otu_range_processor.get_strain_to_genomes_info()
+            otu_range_processor.OTU_to_hap(strain_to_genomes)
+            result_dict = otu_range_processor.parallel(flag="strain")
+            with open("strain_range.txt", "w") as f:
+                for key, value in result_dict.items():
+                    f.write(f"{key}\t{value[0]}\t{value[1]}\n")    
+    else:
+        parser.add_argument("pangenome_vg_files", type=str, help="Pangenome vg files.")
+        parser.add_argument("vg", type=str, help="Vg path.")
+        parser.add_argument("pangenome_ge2", type=str, help="Pangenome ge2")
+        parser.add_argument("pangenome_eq1", type=str, help="Pangenome eq1")
+        parser.add_argument("-t", "--threads", dest="threads", type=int, default=64, help="Set number of threads.")
+        args = parser.parse_args()
+        species_to_node_count = get_node_counts_from_vg_files(args.pangenome_vg_files, args.vg, args.threads)
+        pangenome_ge2 = set(pd.read_csv(args.pangenome_ge2, header=None, dtype=object).iloc[:,0].tolist())
+        try:
+            pangenome_eq1 = set(pd.read_csv(args.pangenome_eq1, header=None, dtype=object).iloc[:, 0].tolist())
+        except pd.errors.EmptyDataError:
+            # print(f"Warning: The file {args.pangenome_eq1} is empty.")
+            pangenome_eq1 = set()
         with open("species_range.txt", "w") as f:
-            for key, value in result_dict.items():
-                f.write(f"{key}\t{value[0]}\t{value[1]}\n")
-    if args.strain_flag:
-        strain_to_genomes = otu_range_processor.get_strain_to_genomes_info()
-        otu_range_processor.OTU_to_hap(strain_to_genomes)
-        result_dict = otu_range_processor.parallel(flag="strain")
-        with open("strain_range.txt", "w") as f:
-            for key, value in result_dict.items():
-                f.write(f"{key}\t{value[0]}\t{value[1]}\n")    
+            nodes_sum = 0
+            for key, value in species_to_node_count.items():
+                if key in pangenome_ge2:
+                    flag = 1
+                elif key in pangenome_eq1:
+                    flag = 0
+                else:
+                    print(key)
+                start = nodes_sum + 1
+                end = nodes_sum + value
+                nodes_sum = nodes_sum + value
+                f.write(f"{key}\t{start}\t{end}\t{flag}\n")
+
+
+                
+                

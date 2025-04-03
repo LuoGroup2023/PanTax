@@ -1,45 +1,87 @@
 # PanTax
 
-PanTax is a pangenome graph-based taxonomic classification tool designed to overcome the limitations of traditional single-reference genome approaches. It excels in providing accurate taxonomic classification at the strain level, handling both short and long reads, and supporting single or multiple species. By leveraging pangenome graphs, PanTax captures the genetic diversity across multiple related genomes, thereby eliminating the biases introduced by using a single linear representative genome. 
+PanTax is a pangenome graph-based taxonomic profiling tool designed to overcome the limitations of traditional single-reference genome approaches. It excels in providing accurate taxonomic profiling at the strain level, handling both short and long reads, and supporting single or multiple species. By leveraging pangenome graphs, PanTax captures the genetic diversity across multiple related genomes, thereby eliminating the biases introduced by using linear genomes. 
 
 ## Installation
 The dependencies of PaxTax can generally be installed through conda. There are two dependencies that require special attention. 
 
 Firstly, PanTax relies on the [Gurobi Optimizer](https://www.gurobi.com/solutions/gurobi-optimizer/) Python package. While the package download is included in the environment.yaml file, a license must be obtained from the official website to use it for large model optimizations.
 
-Secondly, old version [pggb](https://github.com/pangenome/pggb.git) 0.5.4 depends on vg version 1.40, which is incompatible with the version of vg we use for read alignment. We recommend using a more recent version of [vg](https://github.com/vgteam/vg.git), specifically vg>=1.52. We have included the vg 1.52 executable file (default path) in the tools directory. If this is not available, we suggest creating a new environment with conda and installing vg. You can then place it in the tools directory via a symbolic link or specify its path directly using the `--vg` option.
-
-> By the way, the version of the main tools we used in the paper's experiments are `pggb` 0.5.4 (requirement `vg` 1.40), `vg` 1.52, `gurobipy` 11.0.2.
+Secondly, the [pggb](https://github.com/pangenome/pggb.git) on Bioconda depends on a specific version of [vg](https://github.com/vgteam/vg.git), preventing timely updates to the latest vg version. This implies that installing PanTax from Bioconda would face the same issue. Therefore, we recommend installing PanTax from the source. We will create a new environment with conda and installing latest vg. You can then place it in the tools directory via a symbolic link or specify its path directly using the `--vg` option.
 
 * **From bioconda**
 
 ```
 conda install -c bioconda -c conda-forge -c gurobi pantax gurobi 
 
-## Note that if you install with conda, you don't need to specified the absolute path of pantax.
+## Run pantax.
 pantax -h
 ```
-**Due to the strong recommendation of bioconda to use the latest version of the tools, `PanTax` on bioconda depends on `pggb` 0.6.0 and `vg` 1.59.**
 
 * **From source**
 ```
 git clone https://github.com/LuoGroup2023/PanTax.git
+conda create -n pantax python=3.10
+conda activate pantax
+conda install -c bioconda -c conda-forge -c gurobi -c defaults \
+    r-base=4.2 \
+    samtools=1.19.2 \
+    bcftools=1.19 \
+    htslib=1.19.1 \
+    pggb \
+    vg \
+    graphaligner \
+    sylph \
+    h5py \
+    pandas \
+    tqdm \
+    numpy \
+    networkx \
+    pyarrow \
+    gurobi
 cd PanTax
+bash install.sh
+
+# If vg is not available, install with conda.(optional)
+conda create -n vg python=3.10
+conda activate vg
+conda install vg -c bioconda
+cd tools
+ln -fs /path/to/miniconda3/envs/vg/bin/vg ./
+
+# Run pantax
+cd ../scripts
+./pantax -h
+```
+
+* **From source (Version for conducting experiments)**
+
+> The version of the main tools we used in the paper's experiments are `pggb` 0.6.0, `vg` 1.52, `sylph` 0.6.1, `gurobipy` 11.0.2.
+
+```
+git clone https://github.com/LuoGroup2023/PanTax.git
 conda env create -f environment.yaml
-sh install.sh
-conda activate Pantax
+conda activate pantax_v12
+cd PanTax
+bash install.sh
 
 # If vg is not available, install with conda.(optional)
 conda create -n vg python=3.10
 conda activate vg
 conda install vg=1.52 -c bioconda
-ln -fs /path/to/miniconda3/envs/vg/bin/vg PanTax/tools
+cd tools
+ln -fs /path/to/miniconda3/envs/vg/bin/vg ./
+
+# Run pantax
+cd ../scripts
+chmod +x pantax pantax_utils data_preprocessing 
+./pantax -h
 ```
 
 
 ## Genome preprocessing
 
-We recommend removing plasmids and redundancy from the genome first with `--remove` option and `--cluster` option, respectively. Eventually you will get a file containing genomic information in /path/to/database/library.
+We recommend removing plasmids and redundancy from the genome first with `--remove`, `--compute`, `--cluster` option. Eventually you will get final file containing genomic information in /path/to/database.
 
 If genomes are all in NCBI refseq database, you only need to use `-r` option to specify the directory containing these genomes.
 
@@ -61,7 +103,7 @@ GCF_025402875.1_ASM2540287v1	24.1	24	Shewanella putrefaciens	/path/to/GCF_025402
 ## Running
 * **Create database only** 
 ```
-/path/to/PanTax/scripts/pantax -f $genome_info --create
+pantax -f $genome_info --create
 ```
 You'll need to run `/path/to/PanTax/scripts/pantax -f $genome_info --create`. This will generate reference_pangenome.gfa and other files in your database directory.
 
@@ -71,60 +113,78 @@ Due to the large size of the reference pangenome we used for testing, we provide
 1. species level and strain level 
 ```
 # long read
-/path/to/PanTax/scripts/pantax -f $genome_info -l -r $fq -db $db --species-level --strain-level
+pantax -f $genome_info -l -r $fq -db $db --species-level --strain-level
 # short read(pair-end)
-/path/to/PanTax/scripts/pantax -f $genome_info -s -p -r $fq -db $db --species-level --strain-level
+pantax -f $genome_info -s -p -r $fq -db $db --species-level --strain-level
 ```
 2. species level and then strain level
 ```
 # long read
 # species level 
-/path/to/PanTax/scripts/pantax -f $genome_info -l -r $fq -db $db --species-level -n
+pantax -f $genome_info -l -r $fq -db $db --species-level -n
 # strain level
-/path/to/PanTax/scripts/pantax -f $genome_info -l -r $fq -db $db --strain-level -n
+pantax -f $genome_info -l -r $fq -db $db --strain-level -n
 ```
+
+* **Fast query with specified database**
+```
+# long read
+pantax -f $genome_info -l -r $fq -db $db --species-level --strain-level --fast
+# short read(pair-end)
+pantax -f $genome_info -s -p -r $fq -db $db --species-level --strain-level --fast
+```
+
 
 ## options
 ```
 Usage: /path/to/PanTax/scripts/pantax -f genomes_info -s/-l -r read.fq [option]
-       paired-end: /path/to/PanTax/scripts/pantax -f genomes_info -s -p -r read.fq --species-level
+       paired-end: /path/to/PanTax/scripts/pantax -f genomes_info -s -p -r read.fq --species-level --strain-level
 
-Strain-level taxonomic classification of metagenomic data using pangenome graphs
+Strain-level metagenomic profiling using pangenome graphs with PanTax
     General options:
-        --create                          Create database only.
-        --vg FILE                         Path to vg executable file.
-        -n, --next                        Keep the temporary folder for later use at the strain level.
-        --debug                           Keep the temporary folder for any situation.
-        --sample                          Sampling nodes(500) are used for small model testing (set for codeocean).
+        -f, --genomesInformation file:    A list of reference genomes in specified format. (Mandatory)
+        -db dir                           Name for pantax DB (default: pantax_db).
+        -T dir                            Temporary directory (default: pantax_db_tmp).
+        -n, --next                        Keep the temporary folder for later use at the strain level (resume).
+        -t, --threads int                 Number of processes to run in parallel. (default: all available)
         -v, --verbose                     Detailed database build log.
-        -t, --threads INT                 Number of processes to run in parallel(default: 64).
+        --vg file                         Path to vg executable file.
+        --debug                           Keep the temporary folder for any situation.
         --help, -h                        Print this help message.
         --version                         Print the version info.
     Database creation:
-        -f, --genomesInformation FILE:    A list of reference genomes in specified format (Mandatory).
-        -db NAME                          Name for pantax DB (default: pantax_db).
-    Index construction:
+        --create                          Create the database only.
+        --fast                            Create the database using genomes filtered by sylph query instead of all genomes.
+        -g, --save                        Save species graph information.
+        --force                           Force to rebuild pangenome.
+        -e file                           Path to pangenome building tool executable file. (default: pggb)
+        -A, --ani float                   ANI threshold for sylph query result filter. (default: 99)
+    Index construction(for vg giraffe):
+        --index                           Create the index only.
+        --best                            Best autoindex, which corresponds to vg autoindex. (only used with -s)
+        --fast-aln                        Long read fast alignment with vg instead of Graphaligner. (only used with -l)
+    Read alignment:
+        -r, --fastq-in file               Read and align FASTQ-format reads from FILE (two are allowed with -p).
         -s, --short-read                  Short read alignment.
-        --best                            Best autoindex(only used with -s).
-        -l, --long-read                   Long read alignment.
-        --fast                            Fast index(only used with -l).
-    Read classification:
-        -r, --fastq-in FILE               Read and align FASTQ-format reads from FILE (two are allowed with -p).
         -p, --paired                      For paired-end alignment.
+        -l, --long-read                   Long read alignment.
+        -lt, --long-read-type str         Long read type (hifi, clr, ontr9, ontr10). Set precise-clipping based on read type.
+        --precise-clipping float          clip the alignment ends with arg as the identity cutoff between correct / wrong alignments. (default: 0.66)
     Abundacnce calculation:
         --species-level                   Species abundance calulation.
         --strain-level                    Strain abundance calulation.
-        -a float                          Species with more than abundance threshold used for strain abundance calulation.(default: 0.0001).
-        -fr float                         Unique trio nodes fraction(default: 0.3).
-        -fc float                         Unique trio nodes mean count fraction(default: 0.45).
-        --filter                          MAPQ-based filter.
-        --min_cov int                     Minimum coverage required per strain(default: 0).
-        --min_depth int                   Graph nodes with sequence depth less than <min_depth>(default: 0).
-        -gt int                           Gurobi threads(default: 1).
-        -g, --save                        Save species graph information.
-        -S, --classified-out FILENAME     File for alignment output(prefix).
-        -R, --report FILENAME             File for read classification output(prefix).
-        -o, --ouput FILENAME              File for abundance output(prefix).
+        -a float                          Species with relative abundance above the threshold are used for strain abundance estimation. (default: 0.0001)
+        -fr float                         The fraction of strain-specific triplet nodes covered by reads for one strain. The larger, the stricter. (default: multi species 0.3/ single species 0.43)
+        -fc float                         The divergence between first rough and second refined strain abundance estimates. The smaller, the stricter. (default: 0.46)
+        -sh, --shift bool                 Shifting fraction of strain-specific triplet nodes. (multi-species: off, single-species: on)
+        -sd float                         Coverage depth difference between the strain and its species, with only one strain. (default: 0.2)
+        -sr float                         Rescued strain retention score. (default: 0.85)
+        --min_cov int                     Minimum coverage depth required per strain. (default: 0)
+        --min_depth int                   Graph nodes with sequence coverage depth more than <min_depth>. (default: 0)
+        -gt int                           Gurobi threads. (default: 1)
+        -S, --classified-out str          File for alignment output(prefix).
+        -R, --report str                  File for read classification(binning) output(prefix).
+        -o, --ouput str                   File for abundance output(prefix).
 ```
 
 ## PanTax output
@@ -161,14 +221,20 @@ The third column is the average coverage of this species.
 
 The following example shows a classification summary at strain level. 
 ```
-species_taxid	strain_taxid	genome_ID	predicted_coverage	predicted_abundance
-34	34.4	GCF_006401215.1_ASM640121v1	5.0	0.3945153945153945
+species_taxid	strain_taxid	genome_ID	predicted_coverage	predicted_abundance	path_base_cov	unique_trio_fraction	uniq_trio_cov_mean	first_sol	strain_cov_diff	total_cov_diff
+34	34.4	GCF_006401215.1_ASM640121v1	16.0	0.39983790355261384	0.9967217217217217	1.0	15.54	16.0	0.01	0.0010005002501250622
 
 The first column is species taxonomic ID.
 The second column is strain taxonomic ID.
-The third column is the name of a genome.
-The second column is the abundance of this strain normalized by its genomic length.
-The third column is the average coverage of this strain.
+The third column is the name of a genome (assembly accession).
+The fourth column is the average coverage depth of this strain.
+The fifth column is the relative abundance of this strain in the sample, which normalized by its genomic length.
+The sixth column is the coverage of the strain.
+The seventh column is the coverage of strain-specific triplet nodes.
+The eighth column is the average abundance of all strain-specific triplet nodes for this strain.
+The ninth column is the solution of the first path abundance optimization, which represents the average coverage depth of the strain in the first solution.
+The tenth column reflects the divergence between the values in the ninth and tenth columns.
+The eleventh column represents the difference between the sum of the average coverage depths of all strains of the species and the average coverage depth of the species.
 ```
 
 ## Examples
@@ -177,17 +243,17 @@ The third column is the average coverage of this strain.
 ```
 cd PanTax/example/hifi
 # species level
-sh ../../scripts/pantax -f ../example_genomes_info.txt -l -r long_reads.fq.gz --species-level -n
+pantax -f ../example_genomes_info.txt -l -r long_reads.fq.gz --species-level -n
 # strain level
-sh ../../scripts/pantax -f ../example_genomes_info.txt -l -r long_reads.fq.gz --strain-level -n
+pantax -f ../example_genomes_info.txt -l -r long_reads.fq.gz --strain-level -n
 ```
 * short read
 ```
 cd PanTax/example/ngs
 # species level
-sh ../../scripts/pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --species-level -n
+pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --species-level -n
 # strain level
-sh ../../scripts/pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --strain-level -n
+pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --strain-level -n
 ```
 
 ## Possible issues during installation (optional)
@@ -199,6 +265,7 @@ conda install pantax -c bioconda -c conda-forge -c gurobi
 ```
 
 ## Citation
+```
 @article {Zhang2024.11.15.623887,
 	author = {Zhang, Wenhai and Liu, Yuansheng and Xu, Jialu and Chen, Enlian and Schonhuth, Alexander and Luo, Xiao},
 	title = {PanTax: Strain-level taxonomic classification of metagenomic data using pangenome graphs},
@@ -208,3 +275,4 @@ conda install pantax -c bioconda -c conda-forge -c gurobi
 	publisher = {Cold Spring Harbor Laboratory},
 	journal = {bioRxiv}
 }
+```
