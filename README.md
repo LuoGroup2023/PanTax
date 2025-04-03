@@ -31,6 +31,7 @@ conda install -c bioconda -c conda-forge -c gurobi -c defaults \
     pggb \
     vg \
     graphaligner \
+    sylph \
     h5py \
     pandas \
     tqdm \
@@ -40,7 +41,6 @@ conda install -c bioconda -c conda-forge -c gurobi -c defaults \
     gurobi
 cd PanTax
 bash install.sh
-
 
 # If vg is not available, install with conda.(optional)
 conda create -n vg python=3.10
@@ -52,13 +52,11 @@ ln -fs /path/to/miniconda3/envs/vg/bin/vg ./
 # Run pantax
 cd ../scripts
 ./pantax -h
-
 ```
-
 
 * **From source (Version for conducting experiments)**
 
-> The version of the main tools we used in the paper's experiments are `pggb` 0.6.0, `vg` 1.52, `gurobipy` 11.0.2.
+> The version of the main tools we used in the paper's experiments are `pggb` 0.6.0, `vg` 1.52, `sylph` 0.6.1, `gurobipy` 11.0.2.
 
 ```
 git clone https://github.com/LuoGroup2023/PanTax.git
@@ -78,7 +76,6 @@ ln -fs /path/to/miniconda3/envs/vg/bin/vg ./
 cd ../scripts
 chmod +x pantax pantax_utils data_preprocessing 
 ./pantax -h
-
 ```
 
 
@@ -128,6 +125,15 @@ pantax -f $genome_info -l -r $fq -db $db --species-level -n
 # strain level
 pantax -f $genome_info -l -r $fq -db $db --strain-level -n
 ```
+
+* **Fast query with specified database**
+```
+# long read
+pantax -f $genome_info -l -r $fq -db $db --species-level --strain-level --fast
+# short read(pair-end)
+pantax -f $genome_info -s -p -r $fq -db $db --species-level --strain-level --fast
+```
+
 
 ## options
 ```
@@ -215,14 +221,20 @@ The third column is the average coverage of this species.
 
 The following example shows a classification summary at strain level. 
 ```
-species_taxid	strain_taxid	genome_ID	predicted_coverage	predicted_abundance
-34	34.4	GCF_006401215.1_ASM640121v1	5.0	0.3945153945153945
+species_taxid	strain_taxid	genome_ID	predicted_coverage	predicted_abundance	path_base_cov	unique_trio_fraction	uniq_trio_cov_mean	first_sol	strain_cov_diff	total_cov_diff
+34	34.4	GCF_006401215.1_ASM640121v1	16.0	0.39983790355261384	0.9967217217217217	1.0	15.54	16.0	0.01	0.0010005002501250622
 
 The first column is species taxonomic ID.
 The second column is strain taxonomic ID.
-The third column is the name of a genome.
-The second column is the abundance of this strain normalized by its genomic length.
-The third column is the average coverage of this strain.
+The third column is the name of a genome (assembly accession).
+The fourth column is the average coverage depth of this strain.
+The fifth column is the relative abundance of this strain in the sample, which normalized by its genomic length.
+The sixth column is the coverage of the strain.
+The seventh column is the coverage of strain-specific triplet nodes.
+The eighth column is the average abundance of all strain-specific triplet nodes for this strain.
+The ninth column is the solution of the first path abundance optimization, which represents the average coverage depth of the strain in the first solution.
+The tenth column reflects the divergence between the values in the ninth and tenth columns.
+The eleventh column represents the difference between the sum of the average coverage depths of all strains of the species and the average coverage depth of the species.
 ```
 
 ## Examples

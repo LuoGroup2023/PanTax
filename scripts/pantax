@@ -76,7 +76,7 @@ timestamp=$(date "+%Y-%m-%d %H:%M:%S")
 echo "$timestamp - $0 $@"
 
 # set default value
-version="v1.1.0"
+version="v1.2.0"
 # General
 genomes_info=""
 pantax_db="pantax_db"
