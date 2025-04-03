@@ -3,9 +3,9 @@
 set -e
 function print_help() {
   echo "Usage: $0 -f genomes_info -s/-l -r read.fq [option]"
-  echo "       paired-end: $0 -f genomes_info -s -p -r read.fq --species-level"
+  echo "       paired-end: $0 -f genomes_info -s -p -r read.fq --species-level --strain-level"
   echo ""
-  echo "Strain-level taxonomic classification of metagenomic data using pangenome graphs"
+  echo "Strain-level metagenomic profiling using pangenome graphs with PanTax"
   echo ""
   echo "Author: Weihai Zhang"
   echo "Date:   May 2024"
@@ -284,7 +284,7 @@ if [ $create_db == "False" ] && [ $create_index == "False" ] && [ $query_and_fil
         echo "No read type!"
         exit 1
     fi
-    echo "Read classification:"
+    echo "Read alignment:"
     echo "  input_fq: $input_fq"
     echo "  input_fq1: $input_fq1"
     echo "  input_fq2: $input_fq2"
@@ -607,7 +607,8 @@ if [ $strain_level_flag == "True" ]; then
         fi 
         if [ $unique_trio_nodes_count == "None" ]; then
             if [[ $line_count -eq 1 && $unique_trio_nodes_count = "None" ]]; then
-                unique_trio_nodes_count=0.44
+                # unique_trio_nodes_count=0.44
+                unique_trio_nodes_count=$default_unique_trio_nodes_count
                 parallel_poa=false
             else
                 unique_trio_nodes_count=$default_unique_trio_nodes_count
@@ -616,7 +617,8 @@ if [ $strain_level_flag == "True" ]; then
     fi
     if [ $single_cov_ratio == "None" ]; then
         if [[ $line_count -eq 1 && $single_cov_ratio = "None" ]]; then
-            single_cov_ratio=0.90
+            # single_cov_ratio=0.90
+            single_cov_ratio=$default_single_cov_ratio
             parallel_poa=false
         else
             single_cov_ratio=$default_single_cov_ratio

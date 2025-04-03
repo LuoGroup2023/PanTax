@@ -83,7 +83,6 @@ def hcls(matrix_file, method, cutoff, out_dir):
         """)
 
     subprocess.run(f'Rscript {out_dir}/tem_hcls.R > {out_dir}/hcls_res.txt', shell=True)
-
     with open(f'{out_dir}/hcls_res.txt', 'r') as f:
         lines = f.readlines()
 

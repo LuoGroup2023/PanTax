@@ -162,7 +162,7 @@ class GenomesCluster:
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.p) as executor:
             executor.map(self.fastANI_compute, species_taxid)
 
-    def generate_softlink_and_strain_file(self, genome_data_set, species_taxid):
+    def generate_softlink_and_strain_file(self, genome_data_set, rep_to_cluster, species_taxid):
         """The genomes of each species used to construct the pangenome are saved in the diff_strains file"""
         source_dir = self.database
         failure_file = f"{self.output_cluster}/{species_taxid}/failure_file.txt"
@@ -184,6 +184,12 @@ class GenomesCluster:
                     bacteria_file = os.path.basename(bacteria_file)
                     bacteria_file = os.path.join(self.output_cluster, species_taxid, bacteria_file)
                     f.write(bacteria_file + "\n")
+        rep_to_cluster_file = f"{self.output_cluster}/{species_taxid}/{species_taxid}_rep_to_cluster.txt"
+        if not os.path.exists(rep_to_cluster_file):
+            with open(rep_to_cluster_file, "w") as f:
+                for rep, cluster in rep_to_cluster.items():
+                    cluster = ",".join(cluster)
+                    f.write(f"{rep}\t{cluster}\n")
 
     def process_among_clusters(self, species_taxid, reference_or_respresentative_species_set, genome_statics_data):
         """Genome cluster based connected graph. Select genome whose ANI between 95 to 99.9."""
@@ -191,8 +197,10 @@ class GenomesCluster:
             ANI_data = pd.read_csv(f"{self.output_cluster}/{species_taxid}/{species_taxid}_result.txt", usecols= [0, 1, 2], delimiter='\t', header=None)
             ANI_data.columns = ["query", "refer", "ANI"]
             result_strains_set = []
+            rep_to_cluster = {}
             if len(ANI_data) == 1 and (ANI_data["query"] == ANI_data["refer"]).item():
                 result_strains_set = ANI_data["query"].tolist()
+                rep_to_cluster[result_strains_set[0]] = result_strains_set[0]
             else:
                 # due to computing, some compared with themselves appear to have 99.9999 - very close to 100 
                 ANI_data_origin = ANI_data
@@ -229,9 +237,13 @@ class GenomesCluster:
                         else:
                             list_strains = [os.path.basename(i) for i in list(connected_component)]
                             subset_strains = genome_statics_data[genome_statics_data["bacteria"].isin(list_strains)]
-                            max_value = subset_strains["sca_N50"].max()
-                            single_component_result = subset_strains[subset_strains["sca_N50"] == max_value]["bacteria"].values[0]
-                            result_strains_set.append(single_component_result)
+                            # max_value = subset_strains["sca_N50"].max()
+                            # single_component_result = subset_strains[subset_strains["sca_N50"] == max_value]["bacteria"].values[0]
+                            # result_strains_set.append(single_component_result)
+                            if not subset_strains.empty:
+                                best_strain = subset_strains.loc[subset_strains["sca_N50"].idxmax(), "bacteria"]
+                                result_strains_set.append(best_strain)
+                                rep_to_cluster[best_strain] = list_strains
                     result_strains_set = [os.path.join(self.database, os.path.basename(strain)) for strain in result_strains_set]            
                     sorted_pairs = [tuple(sorted(pair)) for pair in combinations(result_strains_set, 2)]
                     qrPairs = ANI_data["qrPair"].tolist()
@@ -262,8 +274,9 @@ class GenomesCluster:
                     subset_strains = genome_statics_data[genome_statics_data["bacteria"].isin(list_strains)]
                     max_value = subset_strains["sca_N50"].max()
                     better_strain = subset_strains[subset_strains["sca_N50"] == max_value]["bacteria"].values[0]
-                    result_strains_set.append(better_strain)            
-            self.generate_softlink_and_strain_file(result_strains_set, species_taxid)  
+                    result_strains_set.append(better_strain)  
+                rep_to_cluster[result_strains_set[0]] = result_strains_set[0]    
+            self.generate_softlink_and_strain_file(result_strains_set, rep_to_cluster, species_taxid)  
 
     def parallel_cls(self, species_taxid):        
         partial_process = partial(self.process_among_clusters, reference_or_respresentative_species_set = self.reference_or_respresentative_species_set, genome_statics_data = self.genome_statics_data)

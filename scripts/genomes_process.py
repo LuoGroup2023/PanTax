@@ -20,6 +20,7 @@ def main():
     parser.add_argument("-f", "--gtdb", dest="gtdb_metadata", type=str, help="GTDB metadata file. Specify this file will use GTDB taxonomy.")
     parser.add_argument("-t", "--threads", dest="threads", default=64, type=int, help="Number of threads.")
     parser.add_argument("--remove", dest="remove", action="store_true", help="Whether to remove plasmid.")
+    parser.add_argument("-rl", "--remove_scaffold_len", dest="remove_scaffold_len", default=1, type=int, help="Whether to remove remove <length>Mbp scaffold.")
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(1)
@@ -67,7 +68,7 @@ def main():
     with open(genomes, "w") as f:
         f.write("\n".join(genomes_path) + "\n")
 
-    parallel_extract(genomes, args.output_dir, args.threads, args.output_genomes_info)
+    parallel_extract(genomes, args.output_dir, args.threads, args.remove_scaffold_len)
     log.logger.info(f"Extract genomes successfully, the genome database in {os.path.abspath(args.output_dir)}")
     return
 
@@ -183,8 +184,9 @@ def open_file(file_path):
     else:
         return open(file_path, "r")
 
-def extract_complete_sequence(genome_info, progress_counter):
+def extract_complete_sequence(genome_info, remove_scaffold_len, progress_counter):
     """remove plasmids"""
+    remove_scaffold_len = remove_scaffold_len*1000000
     genome_file = genome_info[0]
     new_genome_file_path = genome_info[1]
     new_genome_file_path = os.path.join(new_genome_file_path, os.path.basename(genome_file))
@@ -206,6 +208,7 @@ def extract_complete_sequence(genome_info, progress_counter):
                 if sequence_name:
                     all_sequence[sequence_name] = "\n".join(sequence)
             genome_sequence_names = [key for key in all_sequence.keys() if "plasmid" not in key]
+            genome_sequence_names = [key for key, value in all_sequence.items() if len(value) >= remove_scaffold_len]
             chromosome_genome_data = []
             if len(genome_sequence_names) >= 1:
                 for genome_sequence_name in genome_sequence_names:
@@ -218,7 +221,8 @@ def extract_complete_sequence(genome_info, progress_counter):
                 else:
                     with open(new_genome_file_path, "w") as f:
                         f.write("\n".join(chromosome_genome_data) + "\n")
-            
+            else:
+                print(f"{genome_file} all scaffolds are smaller than 1Mbp.")
             # Locking to safely write to the output file
             # with file_lock:
             #     with open(progress_counter["output_file"], "a") as output_f:
@@ -230,7 +234,7 @@ def extract_complete_sequence(genome_info, progress_counter):
         progress_counter["completed"] += 1
         print(f"Completed {new_genome_file_path}: {progress_counter['completed']}/{progress_counter['total']}")
 
-def parallel_extract(genomes, genomes_database_path, threads, output_file):
+def parallel_extract(genomes, genomes_database_path, threads, remove_scaffold_len):
     """parallel remove plasmids"""
     with open(genomes, "r") as f:
         genome_file_set = [line.strip() for line in f]
@@ -245,7 +249,7 @@ def parallel_extract(genomes, genomes_database_path, threads, output_file):
     if threads > 1:
         with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
             futures = [
-                executor.submit(extract_complete_sequence, genome, progress_counter)
+                executor.submit(extract_complete_sequence, genome, remove_scaffold_len, progress_counter)
                 for genome in genome_info
             ]
             
@@ -253,7 +257,7 @@ def parallel_extract(genomes, genomes_database_path, threads, output_file):
                 future.result()
     elif threads == 1:
         for _genome_info in genome_info:
-            extract_complete_sequence(_genome_info, progress_counter)
+            extract_complete_sequence(_genome_info, remove_scaffold_len, progress_counter)
 
 def get_genomes_info(summary_file_path, gtdb_metadata, output_dir, genomes_path, output_genomes_info, genome_assembly_lvl):
     assert isinstance(genome_assembly_lvl, str)

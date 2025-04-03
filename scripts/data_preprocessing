@@ -65,6 +65,8 @@ gtdb_metadata=None
 genome_asm_lvl="all"
 species_cluster=None
 
+remove_scaffold_len=0
+
 timestamp=$(date "+%Y-%m-%d %H:%M:%S")
 echo "$timestamp - $0 $@"
 
@@ -97,6 +99,7 @@ while [[ "$1" != "" ]]; do
         "--gm") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { gtdb_metadata="$2"; db="gtdb"; shift 2; } ;;
         "-sc" | "--species_cluster") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { species_cluster="$2"; shift 2; } ;;
         "-l" | "--genome-assembly-lvl") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { genome_asm_lvl="$2"; shift 2; } ;;
+        "-rl") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { remove_scaffold_len="$2"; shift 2; } ;;
         --) shift; break;;
         *) echo "Error: invalid option \"$1\""; exit 1;;
     esac
@@ -143,6 +146,7 @@ run_genomes_process() {
                                           -p $species_cluster \
                                           -d $db \
                                           -s $summary_file \
+                                          -rl $remove_scaffold_len \
                                           $remove_flag
 }
 
