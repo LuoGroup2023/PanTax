@@ -6,6 +6,9 @@ import numpy as np
 from collections import defaultdict
 from toolkits import check_file_avail, check_dir_avail, is_file_non_empty, extract_genome_name
 
+# This script is based on:
+# https://github.com/liaoherui/StrainScan/blob/main/library/select_rep.py
+
 usage = "Using hierarchical clustering algorithms to reduce genome redundancy and obtain non-redundant genomes."
 
 
