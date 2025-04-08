@@ -1,13 +1,36 @@
-# PanTax
+# PanTax: Strain-level metagenomic profiling using pangenome graphs
 
-PanTax is a pangenome graph-based taxonomic profiling tool designed to overcome the limitations of traditional single-reference genome approaches. It excels in providing accurate taxonomic profiling at the strain level, handling both short and long reads, and supporting single or multiple species. By leveraging pangenome graphs, PanTax captures the genetic diversity across multiple related genomes, thereby eliminating the biases introduced by using linear genomes. 
+[![BioConda Install](https://img.shields.io/conda/dn/bioconda/pantax.svg?style=flag&label=BioConda%20install)](https://anaconda.org/bioconda/pantax)
+[![License](https://img.shields.io/github/license/LuoGroup2023/PanTax)](https://www.gnu.org/)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/LuoGroup2023/PanTax)](https://github.com/LuoGroup2023/PanTax/releases/)
+[![GitHub Downloads](https://img.shields.io/github/downloads/LuoGroup2023/PanTax/total.svg?style=social&logo=github&label=Download)](https://github.com/LuoGroup2023/PanTax/releases)
+[![GitHub stars](https://img.shields.io/github/stars/LuoGroup2023/PanTax?color=yellow)](https://github.com/LuoGroup2023/PanTax/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/LuoGroup2023/PanTax?color=lightblue&label=fork)](https://github.com/LuoGroup2023/PanTax/network/members) 
+<!-- [![visitors](https://visitor-badge.laobi.icu/badge?page_id=LuoGroup2023.PanTax)](https://github.com/LuoGroup2023/PanTax) -->
+
+
+## Table of Contents
+
++ [Overview](#overview)
++ [Installation](#installation)
++ [Genome preprocessing](#genome-preprocessing)
++ [Running](#running)
++ [Options](#options)
++ [PanTax output](#panTax-output)
++ [Examples](#examples)
++ [Possible issues during installation](#possible-issues-during-installation)
++ [Citation](#citation)
+
+## Overview
+
+PanTax is a pangenome graph-based taxonomic profiling tool designed for accurate strain-level classification of metagenomic sequencing data. Unlike traditional methods that rely on multiple linear reference genomes, PanTax leverages pangenome graphs to better represent genetic variation and relationships across related genomes. It supports both short and long reads, works across single or multiple species, and delivers superior precision or recall at the strain level. PanTax provides a robust, scalable solution to taxonomic classification for strain resolution, overcoming key limitations of existing tools.
 
 ## Installation
 The dependencies of PaxTax can generally be installed through conda. There are two dependencies that require special attention. 
 
 Firstly, PanTax relies on the [Gurobi Optimizer](https://www.gurobi.com/solutions/gurobi-optimizer/) Python package. While the package download is included in the environment.yaml file, a license must be obtained from the official website to use it for large model optimizations.
 
-Secondly, the [pggb](https://github.com/pangenome/pggb.git) on Bioconda depends on a specific version of [vg](https://github.com/vgteam/vg.git), preventing timely updates to the latest vg version. This implies that installing PanTax from Bioconda would face the same issue. Therefore, we recommend installing PanTax from the source. We will create a new environment with conda and installing latest vg. You can then place it in the tools directory via a symbolic link or specify its path directly using the `--vg` option.
+Secondly, the [pggb](https://github.com/pangenome/pggb.git) on Bioconda depends on a specific version of [vg](https://github.com/vgteam/vg.git) 1.59, preventing timely updates to the latest vg version. This implies that installing PanTax from Bioconda would face the same issue. Therefore, we recommend installing PanTax from the source. You need create a new environment with conda and installing latest vg, and then place it in the tools directory via a symbolic link or specify its path directly using the `--vg` option.
 
 * **From bioconda**
 
@@ -20,7 +43,7 @@ pantax -h
 
 * **From source**
 ```
-git clone https://github.com/LuoGroup2023/PanTax.git
+git clone https://github.com/LuoGroup2023/PanTax.git --recursive
 conda create -n pantax python=3.10
 conda activate pantax
 conda install -c bioconda -c conda-forge -c gurobi -c defaults \
@@ -47,7 +70,7 @@ conda create -n vg python=3.10
 conda activate vg
 conda install vg -c bioconda
 cd tools
-ln -fs /path/to/miniconda3/envs/vg/bin/vg ./
+ln -fs $(which vg) ./
 
 # Run pantax
 cd ../scripts
@@ -70,7 +93,7 @@ conda create -n vg python=3.10
 conda activate vg
 conda install vg=1.52 -c bioconda
 cd tools
-ln -fs /path/to/miniconda3/envs/vg/bin/vg ./
+ln -fs $(which vg) ./
 
 # Run pantax
 cd ../scripts
@@ -135,7 +158,7 @@ pantax -f $genome_info -s -p -r $fq -db $db --species-level --strain-level --fas
 ```
 
 
-## options
+## Options
 ```
 Usage: /path/to/PanTax/scripts/pantax -f genomes_info -s/-l -r read.fq [option]
        paired-end: /path/to/PanTax/scripts/pantax -f genomes_info -s -p -r read.fq --species-level --strain-level
