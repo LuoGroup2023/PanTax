@@ -36,6 +36,15 @@ pub struct ProfileArgs {
     #[clap(short = 'd', long = "db", help_heading = "INPUT FILE", help = "PanTax database directory.")]
     pub db: PathBuf,      
 
+    #[clap(short = 'f', long = "unique_trio_nodes_fraction", default_value_t = 0.3, help = "Unique trio nodes fraction.")]
+    pub unique_trio_nodes_fraction: f64,
+
+    #[clap(long = "mmcov", default_value_t = 0.0, help = "Strain min coverage.")]
+    pub minimization_min_cov: f64,
+
+    #[clap(short = 'h', long = "min_depth", default_value_t = 0, help = "Graph nodes with sequence coverage depth more than <min_depth>.")]
+    pub min_depth: i64,
+
     #[clap(short = 't', long = "threads", default_value_t = 1, help = "Number of threads [default: 1].")]
     pub threads: usize, 
 
@@ -45,6 +54,9 @@ pub struct ProfileArgs {
 
     #[clap(long="ds", help = "Designated species .")]
     pub designated_species: Option<String>,
+
+    #[clap(long="shift", help = "Unique_trio_nodes_fraction varies with strain coverage depth when estimating single species.")]
+    pub shift: bool,    
 
     #[clap(long="filtered", help = "MAPQ-based filtered.")]
     pub filtered: bool,

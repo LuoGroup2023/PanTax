@@ -8,7 +8,7 @@ use polars::prelude::*;
 use rayon::prelude::*;
 // use polars::df;
 use regex::Regex;
-use std::{fs::File, io::{BufRead, BufReader}, path::{Path, PathBuf}};
+use std::{fs::File, io::{BufRead, BufReader}, path::{self, Path, PathBuf}};
 use crate::cmdline::{ProfileArgs, RclsArgs};
 
 #[derive(Debug, Clone)]
@@ -125,8 +125,11 @@ fn load_gaf_file_lazy(file_path: &PathBuf) -> PolarsResult<DataFrame> {
     let gaf_df_select = gaf_df
         .select([
             col("column_1").alias("read_id"),
-            col("column_2").alias("length"),
+            col("column_2").alias("read_len"),
             col("column_6").alias("path"),
+            col("column_7").alias("read_path_len"),
+            col("column_8").alias("read_start"),
+            col("column_9").alias("read_end"),
             col("column_12").alias("mapq")
         ])
         .collect()?;
@@ -229,6 +232,29 @@ fn process_single_read(
     (read_name.to_string(), mapq, matched_species, read_len)
 }
 
+fn process_single_read_simple(
+    node_path: &str,
+    species_info: &Vec<(String, i64, i64)>,
+    regex: &Regex,
+) -> String {
+    let nodes: Vec<i64> = regex
+        .find_iter(node_path)
+        .filter_map(|m| m.as_str().parse::<i64>().ok())
+        .collect();
+
+    let (min, max) = match nodes.as_slice() {
+        [] => (-1, -1),
+        [n] => (*n, *n),
+        _ => (*nodes.iter().min().unwrap(), *nodes.iter().max().unwrap()),
+    };
+
+    species_info
+        .iter()
+        .find(|(_, start, end)| min >= *start && max <= *end)
+        .map(|(s, _, _)| s.clone())
+        .unwrap_or_else(|| "U".to_string())
+}
+
 // Step 4: Function to process reads in parallel
 fn process_reads_parallel(
     gaf_df: &DataFrame,
@@ -274,6 +300,27 @@ fn process_reads_parallel(
     // Ok(DataFrame::new(vec![read_name_series.into(), mapq_series.into(), species_series.into(), read_len_series.into()])?)
     Ok(output_df)
 }
+
+fn process_reads_parallel_simple(
+    gaf_df: &DataFrame,
+    species_info: &Vec<(String, i64, i64)>,
+    regex: &Regex,
+    threads: usize,
+) -> PolarsResult<DataFrame> {
+    let node_paths = gaf_df.column("path")?.str()?.into_no_null_iter().collect::<Vec<_>>();
+
+    let matched_species: Vec<String> = node_paths
+        .into_par_iter() 
+        .map(|path| {
+            process_single_read_simple(path, species_info, regex)
+        })
+        .collect();
+
+    let output_df = gaf_df.hstack(&[Column::new("species".into(), matched_species)])?;
+
+    Ok(output_df)
+}
+
 
 #[cfg(feature = "dev_test")]
 fn process_single_read2(
@@ -400,7 +447,7 @@ pub fn rcls_profile(args: &ProfileArgs) -> PolarsResult<DataFrame> {
     let species_info = load_species_range(&args.range_file)?;
     let gaf_df = load_gaf_file_lazy(&args.input_aln_file)?;
     let regex = Regex::new(r"\d+").unwrap();
-    let output_df = process_reads_parallel(&gaf_df, &species_info, &regex, args.threads)?;    
+    let output_df = process_reads_parallel_simple(&gaf_df, &species_info, &regex, args.threads)?;    
     Ok(output_df)
 }
 
