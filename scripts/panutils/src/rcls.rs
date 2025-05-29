@@ -1,4 +1,5 @@
 #![allow(unused_variables)]
+#![allow(unused_imports)]
 #![allow(dead_code)]
 // use polars::lazy::dsl::*;
 use polars::prelude::*;
@@ -115,7 +116,7 @@ fn load_gaf_file(file_path: &PathBuf, threads: usize) -> PolarsResult<DataFrame>
 }
 
 
-fn load_gaf_file_lazy(file_path: &PathBuf) -> PolarsResult<DataFrame> {
+pub fn load_gaf_file_lazy(file_path: &PathBuf) -> PolarsResult<DataFrame> {
     let gaf_df = LazyCsvReader::new(file_path.clone())
         .with_has_header(false)
         .with_separator(b'\t')
@@ -442,12 +443,12 @@ pub fn save_output_to_file(df: &mut DataFrame, output_file: &str, write_with_hea
 //     Ok(df1_rows == df2_rows)
 // }
 
-
-pub fn rcls_profile(args: &ProfileArgs) -> PolarsResult<DataFrame> {
-    let species_info = load_species_range(&args.range_file)?;
-    let gaf_df = load_gaf_file_lazy(&args.input_aln_file)?;
+use crate::profile::InputFile;
+pub fn rcls_profile(input_file: &InputFile, threads: usize) -> PolarsResult<DataFrame> {
+    let species_info = load_species_range(&input_file.range_file.as_ref().unwrap())?;
+    let gaf_df = load_gaf_file_lazy(&input_file.gaf_file.as_ref().unwrap())?;
     let regex = Regex::new(r"\d+").unwrap();
-    let output_df = process_reads_parallel_simple(&gaf_df, &species_info, &regex, args.threads)?;    
+    let output_df = process_reads_parallel_simple(&gaf_df, &species_info, &regex, threads)?;    
     Ok(output_df)
 }
 

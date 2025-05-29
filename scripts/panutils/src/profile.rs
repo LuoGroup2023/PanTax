@@ -1,24 +1,53 @@
 
-use grb::expr::LinExpr;
+use crate::{cmdline::ProfileArgs, rcls};
+use rcls::{save_output_to_file, load_gaf_file_lazy};
+
 use log::*;
 use chrono::Local;
-use std::fs::{File, metadata};
+use regex::Regex;
+use rayon::prelude::*;
+
+use polars::frame::DataFrame;
+use polars::prelude::*;
+use polars::functions::concat_df_horizontal;
+
+use std::fs::{File, create_dir_all};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use dashmap::DashMap;
+use std::time::Instant;
 use std::io::{BufRead, BufReader};
-use regex::Regex;
-use rayon::{prelude::*, range};
-use polars::frame::DataFrame;
-use polars::prelude::*;
-use nalgebra::{DMatrix, RowDVector};
-use grb::{prelude::*, Error};
-use crate::{cmdline::ProfileArgs, rcls};
-use rcls::save_output_to_file;
-use std::io::{BufWriter, Write}; 
 
-fn check_args_valid(args: &ProfileArgs) {
+use cpu_time::ProcessTime;
+use dashmap::DashMap;
+
+use grb::prelude::*;
+use grb::expr::LinExpr;
+
+use nalgebra::{DMatrix, RowDVector};
+
+use rand::{SeedableRng, rngs::StdRng, seq::IndexedRandom};
+
+// use std::io::{BufWriter, Write}; 
+
+#[derive(Debug, Default, Clone)]
+pub struct InputFile {
+    // db: Option<PathBuf>,
+    pub gaf_file: Option<PathBuf>,
+    pub range_file: Option<PathBuf>,
+    len_file: Option<PathBuf>,
+    reads_binning_file: Option<PathBuf>,
+    species_abund_file: Option<PathBuf>,
+    strain_abund_file: Option<PathBuf>,
+    genomes_metadata_file: Option<PathBuf>,
+}
+
+fn check_args_valid(args: &ProfileArgs, input_file: &mut InputFile) {
+
+    if !args.species && !args.strain {
+        panic!("Please choose profiling level with --species or/and --strain.");
+    }
+
     let level: LevelFilter;
     if args.trace {
         level = log::LevelFilter::Trace;
@@ -35,24 +64,128 @@ fn check_args_valid(args: &ProfileArgs) {
 
     rayon::ThreadPoolBuilder::new().num_threads(args.threads).build_global().unwrap();
 
-    for (name, path) in &[
-        ("GAF mapping file", &args.input_aln_file),
-        ("Species range file", &args.range_file),
-        ("Species length file", &args.species_len_file),
-    ] {
-        if !path.exists() {
-            panic!("Error: {} not found at path {:?}", name, path);
-        }
-        if !path.is_file() {
-            panic!("Error: {} path {:?} is not a file", name, path);
-        }
+    let db = &args.db;
+    if !(db.exists() && db.is_dir()) {
+        panic!("Error: Specified PanTax database directory {:?} is not a valid directory path", db);
+    }
 
-        let metadata = metadata(path).expect("Failed to get metadata");
-        if metadata.len() == 0 {
-            panic!("Error: {} at {:?} is empty", name, path);
+    let wd = &args.wd;
+    if !(wd.exists() && wd.is_dir()) {
+        panic!("Error: Specified PanTax work directory {:?} is not a valid directory path", wd);
+    }
+
+    fn is_existing_file(name: &str, opt_path: &Option<PathBuf>) {
+        let is_exist = opt_path
+            .as_ref()
+            .map_or(false, |p| p.exists() && p.is_file());
+        if !is_exist {
+            let path_str = opt_path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "<none>".to_string());
+            panic!("Error: Specified {} '{}' is not a valid file path", name, path_str);
         }
     }
 
+    fn choose_existing_file_from_two_files(
+        name: &str,
+        path1: &Option<PathBuf>,
+        path2: &Option<PathBuf>,
+    ) -> PathBuf {
+        let exist1 = path1.as_ref().filter(|p| p.exists() && p.is_file());
+        let exist2 = path2.as_ref().filter(|p| p.exists() && p.is_file());
+    
+        match (exist1, exist2) {
+            (Some(p1), Some(_)) => p1.clone(), // if two file both exist, return first file
+            (Some(p1), None) => p1.clone(),
+            (None, Some(p2)) => p2.clone(),
+            (None, None) => {
+                let path_str1 = path1
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "<none>".to_string());
+                let path_str2 = path2
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "<none>".to_string());
+                panic!(
+                    "Error: Neither {} '{}' nor '{}' is a valid file path",
+                    name, path_str1, path_str2
+                );
+            }
+        }
+    }
+
+    let species_abund_file_is_exist = if !args.force {
+        let species_abund_file = args.wd.join("species_abundance.txt");
+        let exists = species_abund_file.exists() && species_abund_file.is_file();
+        if exists {
+            input_file.species_abund_file = Some(species_abund_file);
+        }
+        exists
+    } else {
+        false
+    };
+
+    let strain_abund_file_is_exist = if !args.force {
+        let strain_abund_file = args.wd.join("strain_abundance.txt");
+        let exists = strain_abund_file.exists() && strain_abund_file.is_file();
+        if exists {
+            input_file.strain_abund_file = Some(strain_abund_file);
+        }
+        exists
+    } else {
+        false
+    };
+
+    if args.species && !species_abund_file_is_exist {
+        is_existing_file("GAF mapping file", &args.input_aln_file);
+        input_file.gaf_file = args.input_aln_file.clone();
+
+        let range_file = choose_existing_file_from_two_files("species range file", &args.range_file, &Some(args.db.join("species_range.txt")));
+        input_file.range_file = Some(range_file);
+
+        let len_file = choose_existing_file_from_two_files("species length file", &args.species_len_file, &Some(args.db.join("species_genomes_stats.txt")));
+        input_file.len_file = Some(len_file);
+
+        if args.strain {
+            let genomes_metadata_file = choose_existing_file_from_two_files("genomes metadata file", &args.genomes_metadata, &Some(args.db.join("genomes_info.txt")));
+            input_file.genomes_metadata_file = Some(genomes_metadata_file);    
+        }
+    } else if args.strain && !strain_abund_file_is_exist {
+        is_existing_file("GAF mapping file", &args.input_aln_file);
+        input_file.gaf_file = args.input_aln_file.clone();
+
+        let range_file = choose_existing_file_from_two_files("species range file", &args.range_file, &Some(args.db.join("species_range.txt")));
+        input_file.range_file = Some(range_file);
+
+        let default_reads_binning_file = args.wd.join("reads_classification.tsv");
+        // is_existing_file("reads binning file", &Some(reads_binning_file.clone())); 
+        let reads_binning_file = choose_existing_file_from_two_files("reads binning file", &args.reads_binning_file, &Some(default_reads_binning_file.clone()));
+        input_file.reads_binning_file = Some(reads_binning_file);
+
+        let species_abund_file = args.wd.join("species_abundance.txt");
+        is_existing_file("species abundance file", &Some(species_abund_file.clone()));
+        input_file.species_abund_file = Some(species_abund_file);
+
+        let genomes_metadata_file = choose_existing_file_from_two_files("genomes metadata file", &args.genomes_metadata, &Some(args.db.join("genomes_info.txt")));
+        input_file.genomes_metadata_file = Some(genomes_metadata_file);
+
+
+    }
+
+    if !args.output_dir.exists() {
+        create_dir_all(args.output_dir.clone())
+            .unwrap_or_else(|e| panic!("Failed to create directory {:?}: {}", args.output_dir.clone(), e));        
+    }
+
+}
+
+fn file_exists(path_opt: &Option<PathBuf>) -> bool {
+    match path_opt {
+        Some(path) => path.exists(),
+        None => false,
+    }
 }
 
 fn equal_length_read_cls(df: &DataFrame, read_len: i64, isfilter: bool) -> PolarsResult<DataFrame> {
@@ -146,13 +279,13 @@ fn non_equal_length_read_cls(df: &DataFrame, isfilter: bool) -> PolarsResult<Dat
     Ok(grouped_df)
 }
 
-fn species_profile(args: &ProfileArgs, rcls_df: &DataFrame) -> PolarsResult<DataFrame> {
+fn species_profiling(args: &ProfileArgs, input_file: &InputFile, rcls_df: &DataFrame) -> PolarsResult<DataFrame> {
     // read species length file
     let schema = Schema::from_iter(vec![
         Field::new("species".into(), DataType::String),
         Field::new("len".into(), DataType::Float64),
     ]);
-    let species_len_df = LazyCsvReader::new(&args.species_len_file)
+    let species_len_df = LazyCsvReader::new(&input_file.len_file.as_ref().unwrap())
         .with_has_header(false)
         .with_separator(b'\t')
         .with_schema(Some(Arc::new(schema)))
@@ -194,18 +327,18 @@ fn species_profile(args: &ProfileArgs, rcls_df: &DataFrame) -> PolarsResult<Data
         .sort(["predicted_abundance"], SortMultipleOptions::new().with_order_descending(true))
         .collect()?;
     let mut write_species_profile = species_profile.clone();
-    save_output_to_file(&mut write_species_profile, &args.output_name.to_string_lossy(), true)?;
+    save_output_to_file(&mut write_species_profile, &args.output_dir.join("species_abundance.txt").to_string_lossy(), true)?;
     Ok(species_profile)
 }
 
 #[derive(Debug, Clone)]
-pub struct Record {
-    pub read_id: String,
-    pub path: String,
-    pub read_path_len: i64,
-    pub read_start: i64,
-    pub read_end: i64,
-    pub species: String,
+struct Record {
+    read_id: String,
+    path: String,
+    read_path_len: i64,
+    read_start: i64,
+    read_end: i64,
+    species: String,
 }
 
 fn dataframe_to_records_and_check_unique(df: &DataFrame) -> (Vec<Record>, bool) {
@@ -226,15 +359,35 @@ fn dataframe_to_records_and_check_unique(df: &DataFrame) -> (Vec<Record>, bool) 
         if !seen.insert(read_id) {
             unique = false;
         }
-
+        
+    if let (Some(path), Some(read_path_len), Some(read_start), Some(read_end), Some(species)) = (
+        path_series.get(i),
+        read_path_len_series.get(i),
+        read_start_series.get(i),
+        read_end_series.get(i),
+        species_series.get(i),
+    ) {
         records.push(Record {
             read_id: read_id.to_string(),
-            path: path_series.get(i).unwrap().to_string(),
-            read_path_len: read_path_len_series.get(i).unwrap(),
-            read_start: read_start_series.get(i).unwrap(),
-            read_end: read_end_series.get(i).unwrap(),
-            species: species_series.get(i).unwrap().to_string(),
+            path: path.to_string(),
+            read_path_len,
+            read_start,
+            read_end,
+            species: species.to_string(),
         });
+    } else {
+        eprintln!("row {i} -> path: {:?}, species: {:?}", path_series.get(i), species_series.get(i));
+    }
+
+
+        // records.push(Record {
+        //     read_id: read_id.to_string(),
+        //     path: path_series.get(i).unwrap().to_string(),
+        //     read_path_len: read_path_len_series.get(i).unwrap(),
+        //     read_start: read_start_series.get(i).unwrap(),
+        //     read_end: read_end_series.get(i).unwrap(),
+        //     species: species_series.get(i).unwrap().to_string(),
+        // });
     }
 
     (records, unique)
@@ -298,12 +451,12 @@ fn group_reads_by_species(df: &DataFrame) -> BTreeMap<String, Vec<Record>> {
     }
 }
 
-pub struct Graph {
-    pub nodes_len: Vec<i64>,
-    pub paths: BTreeMap<String, Vec<usize>>,
+struct Graph {
+    nodes_len: Vec<i64>,
+    paths: BTreeMap<String, Vec<usize>>,
 }
 
-pub fn read_gfa(gfa_file: &Path, previous: usize) -> Result<Graph, Box<dyn std::error::Error>> {
+fn read_gfa(gfa_file: &Path, previous: usize) -> Result<Graph, Box<dyn std::error::Error>> {
     let file = File::open(gfa_file)?;
     let reader = BufReader::new(file);
 
@@ -384,60 +537,101 @@ pub fn read_gfa(gfa_file: &Path, previous: usize) -> Result<Graph, Box<dyn std::
     Ok(Graph { nodes_len, paths })
 }
 
-pub struct SpeciesRange {
-    pub species: String,
-    pub start: u32,
-    pub end: u32,
+struct SpeciesRange {
+    species: String,
+    start: u32,
+    end: u32,
 }
 
-fn load_species_range(args: &ProfileArgs, species_profile_df: &DataFrame) -> PolarsResult<Vec<SpeciesRange>> {
+fn load_species_range(args: &ProfileArgs, input_file: &InputFile, species_profile_df: &DataFrame) -> PolarsResult<Vec<SpeciesRange>> {
     let schema = Schema::from_iter(vec![
         Field::new("species".into(), DataType::String),
         Field::new("start".into(), DataType::Int64),
         Field::new("end".into(), DataType::Int64),
         Field::new("is_pan".into(), DataType::Int32),
     ]);
-    let species_range_df = LazyCsvReader::new(&args.range_file.clone())
+    let species_range_df = LazyCsvReader::new(&input_file.range_file.as_ref().unwrap())
         .with_has_header(false)
         .with_separator(b'\t')
         .with_schema(Some(Arc::new(schema)))
         .finish()?;
 
-    let species_profile_lazy_df = species_profile_df.clone().lazy().rename(&["species_taxid"], &["species"], false);
-    
-    let species_profile_to_range = species_profile_lazy_df
-        .join(species_range_df, [col("species")], [col("species")], JoinArgs::new(JoinType::Left));
+    let mode_filtered_species_range_df = match args.mode {
+        Some(0) => {
+            species_range_df.filter(col("is_pan").eq(lit(0)))
+        }
+        Some(1) => {
+            species_range_df.filter(col("is_pan").eq(lit(1)))
+        }
+        _ => {
+            species_range_df
+        }
+    };
 
-    let filtered_species_range = if let Some(species_str) = &args.designated_species {
+    let ds_filtered_species_range_df = if let Some(species_str) = &args.designated_species {
         let species_vec: Vec<&str> = species_str
             .split(',')
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
-            .collect();
+            .collect();  
         let designated_species_series = Series::new("designated_species_series".into(), species_vec);
-        species_profile_to_range
-            .filter(col("species").is_in(lit(designated_species_series)))
-            .select([
-                col("species"),
-                col("start"),
-                col("end")
-            ])
-            .collect()?
+        mode_filtered_species_range_df.filter(col("species").is_in(lit(designated_species_series))) 
     } else {
-        species_profile_to_range
-            .select([
-                col("species"),
-                col("start"),
-                col("end")
-            ])
-            .collect()?
-    };    
+        mode_filtered_species_range_df
+    };
+
+    let ds_filtered_species_range_df_check = ds_filtered_species_range_df.clone().collect()?;
+    if ds_filtered_species_range_df_check.height() == 0 {
+        warn!("The filtering before strain profiling has removed all species, and the program is about to exit without performing strain profiling.");
+        std::process::exit(0);
+    }
+
+    let species_profile_lazy_df = species_profile_df.clone().lazy().rename(&["species_taxid"], &["species"], false);
+    
+    let abund_filtered_species_profile_lazy_df = species_profile_lazy_df.filter(col("predicted_abundance").gt(lit(args.min_species_abundance)));
+
+    let species_profile_to_range = abund_filtered_species_profile_lazy_df
+        .join(ds_filtered_species_range_df, [col("species")], [col("species")], JoinArgs::new(JoinType::Inner));
+
+    let final_species_to_range = species_profile_to_range.select([
+        col("species"),
+        col("start"),
+        col("end")
+    ]).collect()?;
+
+    // let species_profile_to_range = species_profile_lazy_df
+    //     .join(species_range_df, [col("species")], [col("species")], JoinArgs::new(JoinType::Inner));
+
+    // let filtered_species_range = if let Some(species_str) = &args.designated_species {
+    //     let species_vec: Vec<&str> = species_str
+    //         .split(',')
+    //         .map(|s| s.trim())
+    //         .filter(|s| !s.is_empty())
+    //         .collect();
+    //     let designated_species_series = Series::new("designated_species_series".into(), species_vec);
+    //     species_profile_to_range
+    //         .filter(col("species").is_in(lit(designated_species_series)))
+    //         .select([
+    //             col("species"),
+    //             col("start"),
+    //             col("end")
+    //         ])
+    //         .collect()?
+    // } else {
+    //     species_profile_to_range
+    //         .select([
+    //             col("species"),
+    //             col("start"),
+    //             col("end")
+    //         ])
+    //         .collect()?
+    // };    
 
 
 
-    let species = filtered_species_range.column("species")?.str()?.into_no_null_iter();
-    let starts = filtered_species_range.column("start")?.i64()?.into_no_null_iter();
-    let ends = filtered_species_range.column("end")?.i64()?.into_no_null_iter();
+    let species = final_species_to_range.column("species")?.str()?.into_no_null_iter();
+    let starts = final_species_to_range.column("start")?.i64()?.into_no_null_iter();
+    let ends = final_species_to_range.column("end")?.i64()?.into_no_null_iter();
     Ok(species
         .zip(starts)
         .zip(ends)
@@ -728,14 +922,34 @@ fn zscore_filter(data: &[f64], threshold: f64) -> Vec<f64> {
         .collect()
 }
 
+#[derive(Debug, Clone)]
 struct GurobiOptVar {
     otu: String,
-    pub hap_metrics: Vec<Vec<String>>,
-    pub possible_paths_idx: Vec<usize>,
+    hap_metrics: Vec<HapMetrics>,
+    possible_paths_idx: Vec<usize>,
+    second_possible_paths_idx: Vec<usize>,
+    orign_n_haps: usize,
+    hap2trio_nodes_m_size: usize,
+    same_path_flag: bool,
+    second_opt: bool,
 }
 
-fn filter_paths(
-    // hap_metrics: &mut Vec<Vec<String>>,
+#[derive(Debug, Default, Clone)]
+struct HapMetrics {
+    otu: Option<String>,
+    hap_id: Option<String>,
+    unique_trio_nodes_fraction: Option<f64>,
+    frequencies_mean: Option<f64>,
+    path_cov_ratio: Option<f64>,
+    first_sol: Option<f64>,
+    divergence: Option<f64>,
+    second_sol: Option<f64>,
+    is_rescue: Option<bool>,
+    total_cov_diff: Option<f64>,
+    // genome_ID: Option<String>,
+}
+
+fn first_filter_paths(
     gurobi_opt_var: &mut GurobiOptVar,
     paths: &BTreeMap<String, Vec<usize>>,
     hap2trio_nodes_m: &DMatrix<u8>,
@@ -743,10 +957,15 @@ fn filter_paths(
     node_abundance_vec: &Vec<f64>,
     args: &ProfileArgs,
 ) {
-    
-    // let mut filtered_haps = Vec::new();
+    for (i, hap_id) in paths.keys().enumerate() {
+        gurobi_opt_var.hap_metrics[i].otu = Some(gurobi_opt_var.otu.clone());
+        gurobi_opt_var.hap_metrics[i].hap_id = Some(hap_id.clone());
+    }
+
     let orign_n_haps = paths.len();
     let hap2trio_nodes_m_size = hap2trio_nodes_m.len();
+    gurobi_opt_var.orign_n_haps = orign_n_haps;
+    gurobi_opt_var.hap2trio_nodes_m_size = hap2trio_nodes_m_size;
     // debug!("{}\thap2trio_nodes_m_size:{}", gurobi_opt_var.otu, hap2trio_nodes_m_size);
     if orign_n_haps != 1 && hap2trio_nodes_m_size != 0 {
         // // for debug
@@ -786,36 +1005,36 @@ fn filter_paths(
                 .collect(); 
 
             let unique_trio_nodes_fraction = non_zero_frequencies.len() as f64 / trio_idxs_len as f64;
-            
+            let unique_trio_nodes_fraction_rounded: f64 = (unique_trio_nodes_fraction * 100.0).round() / 100.0;
             // first metric
-            gurobi_opt_var.hap_metrics[hap_idx][1] = format!("{:.2}", unique_trio_nodes_fraction);
+            gurobi_opt_var.hap_metrics[hap_idx].unique_trio_nodes_fraction = Some(unique_trio_nodes_fraction_rounded);
 
             if args.shift {
                 // filter outliers
                 let filter_non_zero_frequencies = zscore_filter(&non_zero_frequencies, 3.0);
-                let mean: f64 = if filter_non_zero_frequencies.is_empty() {
+                let frequencies_mean: f64 = if filter_non_zero_frequencies.is_empty() {
                     0.0
                 } else {
                     filter_non_zero_frequencies.iter().sum::<f64>() / filter_non_zero_frequencies.len() as f64
                 };
-                let shift_unique_trio_nodes_fraction = if mean >= 1.0 {
-                    let _shift_unique_trio_nodes_fraction = unique_trio_nodes_fraction + (0.8-unique_trio_nodes_fraction) * mean / 100.0;
+                let shift_unique_trio_nodes_fraction = if frequencies_mean >= 1.0 {
+                    let _shift_unique_trio_nodes_fraction = unique_trio_nodes_fraction + (0.8-unique_trio_nodes_fraction) * frequencies_mean / 100.0;
                     if _shift_unique_trio_nodes_fraction > 0.8 {
                         0.8
                     } else {
                         _shift_unique_trio_nodes_fraction
                     }
                 } else {
-                    unique_trio_nodes_fraction * mean
+                    unique_trio_nodes_fraction * frequencies_mean
                 };
-                debug!("\t\t{} unique trio node abundance > 0 ratio: {}, shift unique trio nodes fraction: {}, frequencies mean: {}", hap_id, unique_trio_nodes_fraction, shift_unique_trio_nodes_fraction, mean);
+                debug!("\t\t{} unique trio node abundance > 0 ratio: {}, shift unique trio nodes fraction: {}, frequencies mean: {}", hap_id, unique_trio_nodes_fraction, shift_unique_trio_nodes_fraction, frequencies_mean);
                 
                 if unique_trio_nodes_fraction < shift_unique_trio_nodes_fraction {
                     continue; // filter
                 }
-
+                // let frequencies_mean_rounded: f64 = (frequencies_mean * 100.0).round() / 100.0;
                 // second metric
-                gurobi_opt_var.hap_metrics[hap_idx][2] = format!("{:.2}", mean);
+                gurobi_opt_var.hap_metrics[hap_idx].frequencies_mean = Some(frequencies_mean);
             } else {
                 debug!("\t\t{} unique trio node abundance > 0 ratio: {}", hap_id, non_zero_frequencies.len());
                 if unique_trio_nodes_fraction < args.unique_trio_nodes_fraction {
@@ -823,35 +1042,41 @@ fn filter_paths(
                     continue; // filter
                 }
                 let filter_non_zero_frequencies = zscore_filter(&non_zero_frequencies, 3.0);
-                let mean: f64 = if filter_non_zero_frequencies.is_empty() {
+                let frequencies_mean: f64 = if filter_non_zero_frequencies.is_empty() {
                     0.0
                 } else {
                     filter_non_zero_frequencies.iter().sum::<f64>() / filter_non_zero_frequencies.len() as f64
                 };          
-                gurobi_opt_var.hap_metrics[hap_idx][2] = format!("{:.2}", mean);  
+                // let frequencies_mean_rounded: f64 = (frequencies_mean * 100.0).round() / 100.0;
+                // second metric
+                gurobi_opt_var.hap_metrics[hap_idx].frequencies_mean = Some(frequencies_mean);  
             }
 
             gurobi_opt_var.possible_paths_idx.push(hap_idx);
         };
+        debug!("\t\tFisrt filter #strains / #paths = {} / {}", gurobi_opt_var.possible_paths_idx.len(), orign_n_haps);
         // filtered_haps.push(hap_id.clone());
     } else if orign_n_haps != 1 && hap2trio_nodes_m_size == 0 {
         let mut paths_vec = paths.values();
         let first_path = paths_vec.next().unwrap();
         let all_same = paths_vec.all(|x| x == first_path);
         if all_same {
+            gurobi_opt_var.same_path_flag = true;
             let non_zero_frequencies: Vec<f64> = node_abundance_vec
                 .iter()
                 .cloned() 
                 .filter(|&x| x > 0.0)
                 .collect(); 
-            let mean: f64 = if non_zero_frequencies.is_empty() {
+            let frequencies_mean: f64 = if non_zero_frequencies.is_empty() {
                 0.0
             } else {
                 non_zero_frequencies.iter().sum::<f64>() / non_zero_frequencies.len() as f64
             }; 
+            let frequencies_mean_rounded: f64 = (frequencies_mean * 100.0).round() / 100.0;
+            gurobi_opt_var.hap_metrics[0].frequencies_mean = Some(frequencies_mean_rounded);   
             gurobi_opt_var.possible_paths_idx.push(0);
         } else {
-            warn!("Path more than 1, but have trio node is None.");
+            warn!("{} species path more than 1, but have trio node is None.", gurobi_opt_var.otu);
             gurobi_opt_var.possible_paths_idx = (0..orign_n_haps).collect();
         }
 
@@ -861,14 +1086,84 @@ fn filter_paths(
             .cloned() 
             .filter(|&x| x > 0.0)
             .collect(); 
-        let mean: f64 = if non_zero_frequencies.is_empty() {
+        let frequencies_mean: f64 = if non_zero_frequencies.is_empty() {
             0.0
         } else {
             non_zero_frequencies.iter().sum::<f64>() / non_zero_frequencies.len() as f64
         };
+        let frequencies_mean_rounded: f64 = (frequencies_mean * 100.0).round() / 100.0;
+        gurobi_opt_var.hap_metrics[0].frequencies_mean = Some(frequencies_mean_rounded);   
         gurobi_opt_var.possible_paths_idx.push(0);         
     } 
     // println!("end {:?}", gurobi_opt_var.possible_paths_idx);
+}
+
+fn second_filter_paths(
+    gurobi_opt_var: &mut GurobiOptVar,
+    args: &ProfileArgs
+) {
+    let mut filter_possible_paths_idx = Vec::new();
+    if gurobi_opt_var.orign_n_haps != 1 && gurobi_opt_var.hap2trio_nodes_m_size > 0 {
+        gurobi_opt_var.second_opt = true;
+        for possible_path_idx in gurobi_opt_var.possible_paths_idx.iter() {
+            let frequencies_mean = gurobi_opt_var.hap_metrics[*possible_path_idx].frequencies_mean.unwrap_or(0.0);
+            if frequencies_mean == 0.0 { continue; }
+            let sol = gurobi_opt_var.hap_metrics[*possible_path_idx].first_sol.unwrap();
+            let f = (sol - frequencies_mean).abs() / (sol + frequencies_mean);
+            let f_rounded: f64 = (f * 100.0).round() / 100.0;
+            gurobi_opt_var.hap_metrics[*possible_path_idx].divergence = Some(f_rounded);
+            debug!("\t\thap_id:{}\tfrequencies_mean:{}\tfirst_sol:{}\tdivergence:{}", gurobi_opt_var.hap_metrics[*possible_path_idx].hap_id.as_ref().unwrap(), gurobi_opt_var.hap_metrics[*possible_path_idx].frequencies_mean.as_ref().unwrap(), gurobi_opt_var.hap_metrics[*possible_path_idx].first_sol.as_ref().unwrap(), f_rounded);
+            
+            let epsilon = 1e-2;
+            // // debug 
+            // if gurobi_opt_var.otu == "142" {
+            //     println!("{}\tf_rounded {} {} {} {}", gurobi_opt_var.otu, f_rounded, f > args.unique_trio_nodes_mean_count_f, f - args.unique_trio_nodes_mean_count_f, (f - args.unique_trio_nodes_mean_count_f).abs() < epsilon);
+            // }
+            
+            if (f - args.unique_trio_nodes_mean_count_f) > epsilon {
+                if f <= 0.6 {
+                    let this_strain_single_cov_ratio = gurobi_opt_var.hap_metrics[*possible_path_idx].unique_trio_nodes_fraction.unwrap() * gurobi_opt_var.hap_metrics[*possible_path_idx].path_cov_ratio.unwrap();
+                    if this_strain_single_cov_ratio < args.single_cov_ratio || sol == 0.0 {
+                        continue;
+                    } else {
+                        gurobi_opt_var.hap_metrics[*possible_path_idx].is_rescue = Some(true);
+                        filter_possible_paths_idx.push(*possible_path_idx);
+                    }
+                } else {
+                    continue;
+                }
+            } else if (f - args.unique_trio_nodes_mean_count_f) <= epsilon && sol != 0.0 {
+                filter_possible_paths_idx.push(*possible_path_idx);
+            }
+
+        }
+        gurobi_opt_var.second_possible_paths_idx = filter_possible_paths_idx;
+    } else if (gurobi_opt_var.orign_n_haps != 1 && gurobi_opt_var.hap2trio_nodes_m_size == 0 && gurobi_opt_var.same_path_flag) || (gurobi_opt_var.orign_n_haps == 1) {
+        let frequencies_mean = gurobi_opt_var.hap_metrics[0].frequencies_mean.unwrap();
+        if frequencies_mean > 0.0 {
+            let sol = gurobi_opt_var.hap_metrics[0].first_sol.unwrap();
+            let f = (sol - frequencies_mean).abs() / (sol + frequencies_mean);            
+            let f_rounded: f64 = (f * 100.0).round() / 100.0;
+            debug!("\t\thap_id:{}\tfrequencies_mean:{}\tfirst_sol:{}\tdivergence:{}", gurobi_opt_var.hap_metrics[0].hap_id.as_ref().unwrap(), gurobi_opt_var.hap_metrics[0].frequencies_mean.as_ref().unwrap(), gurobi_opt_var.hap_metrics[0].first_sol.as_ref().unwrap(), f_rounded);
+            gurobi_opt_var.hap_metrics[0].divergence = Some(f_rounded);
+            gurobi_opt_var.hap_metrics[0].second_sol = Some(sol);
+        }
+    } else if gurobi_opt_var.orign_n_haps != 1 && gurobi_opt_var.hap2trio_nodes_m_size == 0 && !gurobi_opt_var.same_path_flag  {
+        for possible_path_idx in gurobi_opt_var.possible_paths_idx.iter() {
+            gurobi_opt_var.hap_metrics[*possible_path_idx].second_sol = gurobi_opt_var.hap_metrics[*possible_path_idx].first_sol.clone();
+        }
+    }
+
+}
+
+fn sample_sorted(vec: &Vec<usize>, sample_size: usize, seed: u64) -> Vec<usize> {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut sampled: Vec<usize> = vec
+        .choose_multiple(&mut rng, sample_size)
+        .cloned()
+        .collect();
+    sampled.sort_unstable();
+    sampled
 }
 
 #[allow(unused_variables)]
@@ -909,11 +1204,11 @@ fn gurobi_opt(
 
     let mut coeff_matrix = DMatrix::<f32>::zeros(nvert, npaths);
     for (i, path) in paths.values().enumerate() {
-        if gurobi_opt_var.possible_paths_idx.contains(&i){
+        if let Some(pos_idx) = gurobi_opt_var.possible_paths_idx.iter().position(|&x| x == i) {
             for &v in path.iter() {
                 // assert!(v < nvert, "Node index {} exceeds nvert {}", v, nvert);
                 // assert!(i < npaths, "Path index {} exceeds npaths {}, {:?}", i, npaths, gurobi_opt_var.possible_paths_idx);
-                coeff_matrix[(v, i)] = 1.0; 
+                coeff_matrix[(v, pos_idx)] = 1.0; 
             }
         }
     }
@@ -931,10 +1226,10 @@ fn gurobi_opt(
     );
     //1 × nvert  @  nvert × npaths  = 1 × npaths
     let path_len = node_len_matrix * &coeff_matrix;
-    let path_ratio = path_cov.component_div(&path_len);
+    let path_ratio: nalgebra::Matrix<f32, nalgebra::Const<1>, nalgebra::Dyn, nalgebra::VecStorage<f32, nalgebra::Const<1>, nalgebra::Dyn>> = path_cov.component_div(&path_len);
 
     for (i, ratio) in path_ratio.iter().enumerate() {
-        gurobi_opt_var.hap_metrics[gurobi_opt_var.possible_paths_idx[i]][3] = ratio.to_string();
+        gurobi_opt_var.hap_metrics[gurobi_opt_var.possible_paths_idx[i]].path_cov_ratio = Some(*ratio as f64);
     }
 
     if npaths > 0 {
@@ -953,12 +1248,31 @@ fn gurobi_opt(
         let _ = m.add_constr("total strains", c!(sum_x_binary <= npaths));
     }
 
+    // only iter the node abundance > 0
     let valid_nodes: Vec<usize> = node_abundance_vec
         .iter()
         .enumerate()
         .filter(|&(_v, &ab)| ab > 0.0)
         .map(|(v, _)| v)
         .collect();
+
+    let sample_valid_nodes = if args.sample_test {
+        if valid_nodes.len() > 500 {
+            debug!("\tFor {} species graph, subsample 500 nodes for test.", gurobi_opt_var.otu);
+            sample_sorted(&valid_nodes, 500, 42)
+        } else {
+            valid_nodes
+        }
+    } else if !args.sample_test && args.sample_nodes > 0 {
+        if valid_nodes.len() > args.sample_nodes {
+            debug!("The {} species graph has too many nodes. Subsample {}.", gurobi_opt_var.otu, args.sample_test);
+            sample_sorted(&valid_nodes, args.sample_nodes, 42)
+        } else {
+            valid_nodes
+        }
+    } else {
+        valid_nodes
+    };
 
     // // for debug
     // if gurobi_opt_var.otu == "Myxococcus_xanthus".to_string() {
@@ -970,8 +1284,8 @@ fn gurobi_opt(
     // }
 
 
-    let mut y_var_vec = Vec::with_capacity(valid_nodes.len());
-    for &v in &valid_nodes {
+    let mut y_var_vec = Vec::with_capacity(sample_valid_nodes.len());
+    for &v in &sample_valid_nodes {
         let yv = add_var!(
             m,
             Continuous,
@@ -981,7 +1295,7 @@ fn gurobi_opt(
     }
     m.update()?;
 
-    println!("{}\t{}", gurobi_opt_var.otu, y_var_vec.len());     
+    // println!("{}\t{}", gurobi_opt_var.otu, y_var_vec.len());     
     let mut n_eval: usize = 0;
     for (i, (v, yv)) in y_var_vec.iter().enumerate() {
         let row = coeff_matrix.row(*v);
@@ -1009,38 +1323,67 @@ fn gurobi_opt(
     m.set_objective(obj_scaled, grb::ModelSense::Minimize)?;
     m.update()?;
     m.set_param(param::LogToConsole, 0)?;
-    m.set_param(param::Threads, 1)?;
+    m.set_param(param::Threads, args.gurobi_threads)?;
     m.set_param(param::NumericFocus, 0)?;
     m.set_param(param::PoolSearchMode, 0)?;
     m.set_param(param::PoolSolutions, 10)?;
-    m.set_param(param::Method, 1)?;
-    m.set_param(param::Seed, 42)?;
+    m.set_param(param::Method, 4)?;
+    // m.set_param(param::Seed, 42)?;
     m.optimize()?;
 
     assert_eq!(m.status()?, Status::Optimal);
-    let sol = m.get_obj_attr_batch(attr::X, x_vec.clone())?;
+    let sols = m.get_obj_attr_batch(attr::X, x_vec.clone())?;
     let objval = m.get_attr(attr::ObjVal)?;
-    println!("{}\t{:?}\t{}", gurobi_opt_var.otu, sol, objval);
+    debug!("\t\t{}\t{:?}\t{}", gurobi_opt_var.otu, sols, objval);
 
-    // m.reset(1)?;
-    // m.optimize()?;
+    for (i, sol) in sols.iter().enumerate() {
+        gurobi_opt_var.hap_metrics[gurobi_opt_var.possible_paths_idx[i]].first_sol = Some(*sol);
+    }
 
-    // assert_eq!(m.status()?, Status::Optimal);
-    // let sol2 = m.get_obj_attr_batch(attr::X, x_vec)?;
-    // let objval2 = m.get_attr(attr::ObjVal)?;
-    // println!("{}\t{:?}\t{}", gurobi_opt_var.otu, sol2, objval2);
+    let nstrains = sols.iter().filter(|&&x| x > 0.0).count();
+    debug!("\t\tFirst optimization #strains / #paths = {} / {}", nstrains, npaths);
 
-    // println!("{:?}", sol);
+    second_filter_paths(gurobi_opt_var, &args);   
+    if !gurobi_opt_var.second_opt {
+        if args.debug { print!("\n"); }
+        return Ok(());
+    }
+
+    debug!("\t\tSecond filter #strains / #paths = {} / {}", gurobi_opt_var.second_possible_paths_idx.len(), npaths); 
+
+    m.reset(0)?;
+
+    for (i, possible_path_idx) in gurobi_opt_var.possible_paths_idx.iter().enumerate() {
+        if !gurobi_opt_var.second_possible_paths_idx.contains(possible_path_idx) {
+            m.add_constr(&format!("x{}", i), c!(x_vec[i] == 0.0))?;
+        }
+    }
+
+    m.optimize()?;
+
+    assert_eq!(m.status()?, Status::Optimal);
+    let sols2 = m.get_obj_attr_batch(attr::X, x_vec)?;
+    let objval2 = m.get_attr(attr::ObjVal)?;
+    debug!("\t\t{}\t{:?}\t{}", gurobi_opt_var.otu, sols2, objval2);
+
+    let nstrains2 = sols2.iter().filter(|&&x| x > 0.0).count();
+    debug!("\t\tSecond optimization #strains / #paths = {} / {}\n", nstrains2, npaths);
+
+    for (&path_idx, sol) in gurobi_opt_var.possible_paths_idx.iter().zip(sols2) {
+        if gurobi_opt_var.second_possible_paths_idx.contains(&path_idx) {
+            if let Some(metric) = gurobi_opt_var.hap_metrics.get_mut(path_idx) {
+                metric.second_sol = Some(sol);
+            } else {
+                panic!("path_idx {} out of bounds for hap_metrics (len = {})", path_idx, gurobi_opt_var.hap_metrics.len());
+            }
+        }
+    }
+
     Ok(())
 }
 
-#[derive(Debug)]
-pub struct OptimizeRes {
-    pub otu: String,
-    pub absolute_abund: f64,
-}
 
-fn optimize_otu(args: &ProfileArgs, otu: &String, start: u32, end: u32, reads_cluster: &[Record]) -> Option<Vec<OptimizeRes>> {
+fn optimize_otu(args: &ProfileArgs, otu: &String, start: u32, end: u32, reads_cluster: &[Record]) -> Option<Vec<HapMetrics>> {
     log::debug!("Reading {} graph information, start: {}, end: {}", otu, start, end);
     let start = start - 1;
     let end = end - 1;
@@ -1058,77 +1401,392 @@ fn optimize_otu(args: &ProfileArgs, otu: &String, start: u32, end: u32, reads_cl
     let (node_abundance_vec, trio_node_abundance_vec, node_base_cov) = get_node_abundances(otu, &graph.nodes_len, &unique_trio_nodes, &unique_trio_nodes_len, start as usize, &reads_cluster);
     let nvert = end - start + 1;
     let non_zero_count = node_abundance_vec.iter().filter(|&&x| x != 0.0).count();
-    debug!("{} species node abundance > 0 number: {}\n", otu, non_zero_count);    
+    debug!("{} species node abundance > 0 number: {}", otu, non_zero_count);    
     let node_abundance_opt_vec: Vec<f64> = node_abundance_vec
         .iter()
         .map(|&x| if x > args.min_depth as f64 { x } else { 0.0 })
         .collect();
 
-    let hap_metrics: Vec<Vec<String>> = graph.paths.keys()
-        .map(|hap| {
-            let mut row = vec![hap.to_string()];
-            row.extend(vec!["-".to_string(); 5]);
-            row.push("0".to_string());
-            row.push("-".to_string());
-            row
-        })
-        .collect();
+    // let hap_metrics: Vec<Vec<String>> = graph.paths.keys()
+    //     .map(|hap| {
+    //         let mut row = vec![hap.to_string()];
+    //         row.extend(vec!["-".to_string(); 5]);
+    //         row.push("0".to_string());
+    //         row.push("-".to_string());
+    //         row
+    //     })
+    //     .collect();
     // let possible_paths_idx = vec![0; graph.paths.len()];
-    let possible_paths_idx = Vec::new();
+
     let mut gurobi_opt_var = GurobiOptVar {
         otu: otu.clone(),
-        hap_metrics: hap_metrics,
-        possible_paths_idx: possible_paths_idx,
+        hap_metrics: vec![HapMetrics::default(); graph.paths.len()],
+        possible_paths_idx: Vec::new(),
+        second_possible_paths_idx: Vec::new(),
+        orign_n_haps: 0,
+        hap2trio_nodes_m_size: 0,
+        same_path_flag: false,
+        second_opt: false,
     };
-    filter_paths(&mut gurobi_opt_var, &graph.paths, &hap2unique_trio_nodes_m, &trio_node_abundance_vec, &node_abundance_opt_vec, &args);
-    gurobi_opt(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args);
-    Some(vec![
-        OptimizeRes { otu: otu.to_string(), absolute_abund: 10.0 }
-    ])
+    first_filter_paths(&mut gurobi_opt_var, &graph.paths, &hap2unique_trio_nodes_m, &trio_node_abundance_vec, &node_abundance_opt_vec, &args);
+    gurobi_opt(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args).unwrap();
+    Some(gurobi_opt_var.hap_metrics)
 }
 
-pub fn profile(args: ProfileArgs) -> Result<(), Box<dyn std::error::Error>> {
-    check_args_valid(&args);
-
-    log::info!("{} - Read classification...", Local::now().format("%Y-%m-%d %H:%M:%S"));
-    let rcls_df = rcls::rcls_profile(&args)?;
-    // let column_names = rcls_df.get_column_names();
-    // println!("Column names: {:?}", column_names);
-    let filter_unmapped_rcls_df = rcls_df
+fn abundace_constraint(species_profile_df: &DataFrame, metrics: &mut [HapMetrics]) -> Result<(), PolarsError> {
+    let mut strain_absolute_abundance = Vec::new();
+    for metric in metrics.iter_mut() {
+        if metric.is_rescue == Some(true) && metric.first_sol.is_some() && metric.second_sol.is_some() {
+            let first = metric.first_sol.unwrap();
+            let second = metric.second_sol.unwrap();
+            metric.second_sol = Some(first.min(second));
+        }
+        strain_absolute_abundance.push(metric.second_sol.unwrap_or(0.0));
+    }
+    let filtered_df = species_profile_df
         .clone()
         .lazy()
-        .filter(col("species").neq(lit("U")))
+        .filter(col("species_taxid").eq(lit(metrics[0].otu.clone().unwrap())))
         .collect()?;
 
-    log::info!("{} - Species level profiling...", Local::now().format("%Y-%m-%d %H:%M:%S"));
-    let species_profile_df = species_profile(&args, &filter_unmapped_rcls_df)?;
+    let species_absolute_abundance = filtered_df
+        .column("predicted_coverage")?
+        .f64()? 
+        .get(0).unwrap();
 
-    log::info!("{} - Strain level profiling...", Local::now().format("%Y-%m-%d %H:%M:%S"));
+    let strain_absolute_abundance_sum: f64 = strain_absolute_abundance.iter().sum();
+    let total_cov_diff = (strain_absolute_abundance_sum - species_absolute_abundance).abs() / ((strain_absolute_abundance_sum + species_absolute_abundance) / 2.0);
+    for metric in metrics.iter_mut() {
+        metric.total_cov_diff = Some(total_cov_diff);
+    }
 
-    let species_ranges = load_species_range(&args, &species_profile_df)?;
+    if strain_absolute_abundance
+        .iter()
+        .cloned()
+        .reduce(f64::max)
+        .map_or(false, |max_val| max_val > 1.05 * species_absolute_abundance) 
+    {
+        let factor = species_absolute_abundance / strain_absolute_abundance_sum;
+        for metric in metrics.iter_mut() {
+            if !metric.is_rescue.unwrap_or(false) && metric.second_sol.is_some() {
+                metric.second_sol = Some(metric.second_sol.unwrap()*factor);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// modify from https://stackoverflow.com/questions/73167416/creating-polars-dataframe-from-vecstruct
+macro_rules! struct_to_dataframe {
+    ($input:expr, [$($field:ident),+]) => {
+        {
+            let len = $input.len().to_owned();
+
+            // Extract the field values into separate vectors
+            $(let mut $field = Vec::with_capacity(len);)*
+
+            for e in $input.into_iter() {
+                $($field.push(e.$field.clone());)*
+            }
+            df! {
+                $(stringify!($field) => $field,)*
+            }
+        }
+    };
+}
+
+fn abundance_est(args: &ProfileArgs, hap_metrics_vec: &[HapMetrics]) -> Result<(), Box<dyn std::error::Error>> {
+    let schema = Schema::from_iter(vec![
+        Field::new("genome_ID".into(), DataType::String),
+        Field::new("strain_taxid".into(), DataType::String),
+        Field::new("species_taxid".into(), DataType::String),
+        Field::new("organism_name".into(), DataType::String),
+        Field::new("id".into(), DataType::String),
+    ]);
+    let genomes_metadata = LazyCsvReader::new(args.db.join("genomes_info.txt"))
+        .with_has_header(true)
+        .with_separator(b'\t')
+        .with_schema(Some(Arc::new(schema)))
+        .finish()?;
+    let selected_genomes_metadata = genomes_metadata
+        .select([
+            col("genome_ID"),
+            col("strain_taxid")
+        ])
+        .with_columns([
+            col("genome_ID")
+                .str()
+                .split(lit("_"))
+                .list()
+                .slice(lit(0), lit(2))
+                .list()
+                .join(lit("_"), true)
+                .alias("hap_id")
+        ]);
+    
+    // let mut write_selected_genomes_metadata = selected_genomes_metadata.clone().collect()?;
+    // save_output_to_file(&mut write_selected_genomes_metadata, "selected_genomes_metadata.txt", true)?;
+
+    let hap_metrics_df = struct_to_dataframe!(hap_metrics_vec, [
+        otu, hap_id, unique_trio_nodes_fraction, frequencies_mean, path_cov_ratio,
+        first_sol, divergence, second_sol, is_rescue, total_cov_diff
+    ]).unwrap();
+
+    let hap_metrics_lazy_df = hap_metrics_df
+        .lazy()
+        .select([
+            col("otu").alias("species_taxid"),
+            col("hap_id"),
+            col("unique_trio_nodes_fraction").alias("unique_trio_fraction"),
+            col("frequencies_mean").alias("uniq_trio_cov_mean"),
+            col("path_cov_ratio").alias("path_base_cov"),
+            col("first_sol"),
+            col("divergence").alias("strain_cov_diff"),
+            col("second_sol").alias("predicted_coverage"),
+            col("total_cov_diff")
+        ]);
+    
+    // let mut write_hap_metrics_lazy_df = hap_metrics_lazy_df.clone().collect()?;
+    // save_output_to_file(&mut write_hap_metrics_lazy_df, "write_hap_metrics_lazy_df.txt", true)?;
+
+    let merged_df = hap_metrics_lazy_df
+        .join(
+            selected_genomes_metadata,
+            [col("hap_id")],
+            [col("hap_id")],
+            JoinArgs::new(JoinType::Left),
+        );
+
+    let merged_df = merged_df.with_columns([
+        (col("predicted_coverage") / col("predicted_coverage").sum())
+            .alias("predicted_abundance")
+    ]);
+
+    let reordered_df = merged_df.clone().select([
+        col("species_taxid"),
+        col("strain_taxid"),
+        col("genome_ID"),
+        col("predicted_coverage"),
+        col("predicted_abundance"),
+        col("path_base_cov"),
+        col("unique_trio_fraction"),
+        col("uniq_trio_cov_mean"),
+        col("first_sol"),
+        col("strain_cov_diff"),
+        col("total_cov_diff"),
+    ]).collect()?;
+    
+    let mut write_reordered_df = reordered_df.clone();
+    save_output_to_file(&mut write_reordered_df, "ori_strain_abundance.txt", true)?;
+
+    let group_info = merged_df.clone()
+        .group_by([col("species_taxid")])
+        .agg([
+            col("hap_id").count().alias("group_size"),
+        ]);
+
+    let filtered = merged_df
+        .join(
+            group_info,
+            [col("species_taxid")],
+            [col("species_taxid")],
+            JoinArgs::new(JoinType::Inner),
+        )
+        .filter(
+            // group_size > 1 || total_cov_diff <= single_cov_diff
+            col("group_size").gt(lit(1))
+                .or(col("total_cov_diff").lt_eq(lit(args.single_cov_diff))),
+        )
+        .filter(
+            col("predicted_coverage")
+                .gt_eq(lit(args.min_cov))
+                .and(col("predicted_coverage").neq(lit(0.0))),
+        )
+        .with_columns([
+            (col("predicted_coverage") / col("predicted_coverage").sum())
+                .alias("predicted_abundance"),
+        ]);    
+    
+    let sort_filtered_df = filtered
+        .sort(["predicted_abundance"], SortMultipleOptions::new().with_order_descending(true));
+
+    let mut final_df = if args.full {
+        sort_filtered_df
+            .select([
+                // col("hap_id"),
+                col("species_taxid"),
+                col("strain_taxid"),
+                col("genome_ID"),
+                col("predicted_coverage"),
+                col("predicted_abundance"),
+                col("path_base_cov"),
+                col("unique_trio_fraction"),
+                col("uniq_trio_cov_mean"),
+                col("first_sol"),
+                col("strain_cov_diff"),
+                col("total_cov_diff"),
+            ])
+            .collect()?
+    } else {
+        sort_filtered_df
+            .select([
+                // col("hap_id"),
+                col("species_taxid"),
+                col("strain_taxid"),
+                col("genome_ID"),
+                col("predicted_coverage").round(2),
+                col("predicted_abundance").round(2),
+                col("path_base_cov").round(2),
+                col("unique_trio_fraction").round(2),
+                col("uniq_trio_cov_mean").round(2),
+                col("first_sol").round(2),
+                col("strain_cov_diff").round(2),
+                col("total_cov_diff").round(2),
+            ])
+            .collect()?     
+    };
+        
+    save_output_to_file(&mut final_df, &args.wd.join("strain_abundance.txt").to_string_lossy(), true)?;
+
+    Ok(())
+}
+
+fn strain_profiling(args: &ProfileArgs, input_file: &InputFile, species_profile_df: &DataFrame, rcls_df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
+    let species_ranges = load_species_range(&args, &input_file, &species_profile_df)?;
     let read_clustered_by_species = group_reads_by_species(&rcls_df);
     let total = species_ranges.len();
     let counter = Arc::new(Mutex::new(0));
     
-    let results: Vec<_> = species_ranges
+    let results: Vec<HapMetrics> = species_ranges
         .par_iter()
         .filter_map(|range| {
             let otu: &String = &range.species;
-            let result: Option<Vec<OptimizeRes>> = match read_clustered_by_species.get(otu) {
-                Some(reads_cluster) => optimize_otu(&args, otu, range.start, range.end, reads_cluster),
-                None => Some(vec![OptimizeRes { otu: otu.to_string(), absolute_abund: 0.0 }]),
-            };    
+            let result: Option<Vec<HapMetrics>> = read_clustered_by_species
+                .get(otu)
+                .and_then(|reads_cluster| {
+                    optimize_otu(&args, otu, range.start, range.end, reads_cluster)
+                        .map(|mut metrics| {
+                            let _ = abundace_constraint(&species_profile_df, &mut metrics);
+                            metrics
+                        } )
+                });   
             let mut count = counter.lock().unwrap();
             *count += 1;
             if *count % 10 == 0 {
                 let percent = (*count as f64) * 100.0 / total as f64;
                 println!("percentage: {:.1}%", percent);
             }
-    
             result
         })
         .flatten()
         .collect();
-    println!("{:?}", results);
+    // println!("{:?}", results);
+    abundance_est(&args, &results)?;
+    Ok(())
+}
+
+pub fn profile(args: ProfileArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let start = Instant::now();
+    let start_cpu = ProcessTime::now();
+    
+    let mut input_file = InputFile::default();
+    check_args_valid(&args, &mut input_file);
+
+    if args.species && !file_exists(&input_file.species_abund_file) {
+        log::info!("{} - Read classification...", Local::now().format("%Y-%m-%d %H:%M:%S"));
+        let rcls_df = rcls::rcls_profile(&input_file, args.threads)?;
+        // let column_names = rcls_df.get_column_names();
+        // println!("Column names: {:?}", column_names);
+        if let Some(out_binning_file) = &args.out_binning_file {
+            let mut selected_rcls_df = rcls_df
+                .clone()
+                .lazy()
+                .select([
+                    col("read_id"),
+                    col("mapq"),
+                    col("species"),
+                    col("read_len")
+                ])
+                .collect()?;
+            save_output_to_file(&mut selected_rcls_df, &out_binning_file.to_string_lossy(), false)?;
+        }
+        let filter_unmapped_rcls_df = rcls_df
+            .clone()
+            .lazy()
+            .filter(col("species").neq(lit("U")))
+            .collect()?;
+    
+        log::info!("{} - Species level profiling...", Local::now().format("%Y-%m-%d %H:%M:%S"));
+        let species_profile_df = species_profiling(&args, &input_file, &filter_unmapped_rcls_df)?;
+
+        if args.strain && !file_exists(&input_file.strain_abund_file) {
+            log::info!("{} - Strain level profiling...", Local::now().format("%Y-%m-%d %H:%M:%S"));
+            strain_profiling(&args, &input_file, &species_profile_df, &filter_unmapped_rcls_df)?;
+        }
+    } else if args.strain && !file_exists(&input_file.strain_abund_file) {
+        log::info!("{} - Strain level profiling...", Local::now().format("%Y-%m-%d %H:%M:%S"));
+        let schema = Schema::from_iter(vec![
+            Field::new("read_id2".into(), DataType::String),
+            Field::new("mapq2".into(), DataType::Int32),
+            Field::new("species".into(), DataType::String),
+            Field::new("read_len2".into(), DataType::Int32),
+        ]);
+        let reads_binning_df = LazyCsvReader::new(input_file.reads_binning_file.as_ref().unwrap())
+            .with_has_header(false)
+            .with_separator(b'\t')
+            .with_schema(Some(Arc::new(schema)))
+            .finish()?
+            .select([col("species")])
+            .collect()?;
+        let gaf_df = load_gaf_file_lazy(&input_file.gaf_file.as_ref().unwrap())?;
+        let rcls_df = concat_df_horizontal(
+            &[gaf_df, reads_binning_df],
+            false
+        )?;
+
+        // if args.debug {
+        //     // Merge two GAF and read binning files, and then determine whether the read binning is out of order 
+        //     // based on whether the two files have the same read_id. 
+        //     // Because some fastq files have the same dual end read_id, 
+        //     // using join merging may result in incorrect merging (Cartesian product).
+        //     let same = rcls_df.clone().lazy().select([col("read_id").eq(col("read_id2")).all(false).alias("equal")]);
+        //     let result = same.collect()?;
+        //     let is_equal = result.column("equal")?.bool()?.get(0).unwrap();   
+        //     let mut write_rcls_df = rcls_df.clone();
+        //     save_output_to_file(&mut write_rcls_df, "reads_binning_debug.tsv", false)?;  
+        //     println!("Equal: {is_equal}");       
+        // }
+
+        let filter_unmapped_rcls_df = rcls_df
+            .clone()
+            .lazy()
+            .filter(col("species").neq(lit("U")))
+            .collect()?;
+
+        let species_profile_df = LazyCsvReader::new(input_file.species_abund_file.as_ref().unwrap())
+            .with_has_header(true)
+            .with_separator(b'\t')
+            .finish()?
+            .collect()?;
+
+        strain_profiling(&args, &input_file, &species_profile_df, &filter_unmapped_rcls_df)?;
+
+    } else {
+        if args.species && !args.strain {
+            info!("Species profiling abundance file: {:?} exists.", input_file.species_abund_file.as_ref().unwrap());
+        } else if !args.species && args.strain {
+            info!("Strain profiling abundance file: {:?} exists.", input_file.strain_abund_file.as_ref().unwrap());
+        } else if args.species && args.strain {
+            info!("Species and strain profiling abundance file: {:?}, {:?} both exist.", input_file.species_abund_file.as_ref().unwrap(), input_file.strain_abund_file.as_ref().unwrap());
+        } 
+    }
+
+    let minutes_clock = start.elapsed().as_secs_f64() / 60.0;
+    log::info!("{} - Profiling execution clock time: {:.2} min", Local::now().format("%Y-%m-%d %H:%M:%S"), minutes_clock);
+
+    let minuted_cpu = start_cpu.elapsed().as_secs_f64() / 60.0;
+    log::info!("{} - Profiling execution cpu time: {:.2} min", Local::now().format("%Y-%m-%d %H:%M:%S"), minuted_cpu);
+
     Ok(())
 }
