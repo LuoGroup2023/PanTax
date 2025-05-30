@@ -376,18 +376,11 @@ fn dataframe_to_records_and_check_unique(df: &DataFrame) -> (Vec<Record>, bool) 
             species: species.to_string(),
         });
     } else {
-        eprintln!("row {i} -> path: {:?}, species: {:?}", path_series.get(i), species_series.get(i));
+        // S0R4970856/2    150     0       150     +       <104888926<104888924<104888923<104888921        82      5       *
+        // some reads like this, very few 
+        debug!("row {} -> path: {:?}, read_path_len: {:?}, read_start: {:?}, read_end: {:?}, species: {:?}", i, path_series.get(i), read_path_len_series.get(i), read_start_series.get(i), read_end_series.get(i), species_series.get(i));
     }
 
-
-        // records.push(Record {
-        //     read_id: read_id.to_string(),
-        //     path: path_series.get(i).unwrap().to_string(),
-        //     read_path_len: read_path_len_series.get(i).unwrap(),
-        //     read_start: read_start_series.get(i).unwrap(),
-        //     read_end: read_end_series.get(i).unwrap(),
-        //     species: species_series.get(i).unwrap().to_string(),
-        // });
     }
 
     (records, unique)
@@ -775,14 +768,31 @@ fn get_node_abundances(
 
         // only one node, read is shorter than the node of the graph
         if start_node == end_node && read_nodes.len() == 1 {
+                // https://github.com/vgteam/vg/issues/4249
+                // S0R4490169/2    150     0       150     +       <77966596       1118    1010    551 
+                // the start position is beyond to end postion
+                // json alignment only displays offset which is the start position
+                // assert!(target_len as usize <= entry.2.len(), "read_id {} {:?} read len {} is longer than {} node len {}", read.read_id, read_nodes, target_len, start_node, entry.2.len() );
+                // very few, we filter them.
+            if target_len < 0 {
+                return;
+            }
             *read_nodes_len.entry(start_node).or_default() += target_len;
             bases_per_node.entry(start_node).and_modify(|v| *v += target_len);
 
             if let Some(mut entry) = node_base_cov_info.get_mut(&start_node) {
-                assert!(target_len as usize <= entry.2.len(), "read_id {} {:?} read len {} is longer than {} node len {}", read.read_id, read_nodes, target_len, start_node, entry.2.len() );
-                for j in read.read_start as usize..read.read_end as usize {
-                    entry.2[j] = 1;
+                if read.read_start < read.read_end && read.read_end <= entry.2.len() as i64 {
+                    for j in read.read_start as usize..read.read_end as usize {
+                        entry.2[j] = 1;
+                    }
+                } else {
+                    debug!(
+                        "read: {} {:?} range out of bounds: [{}..{}) for entry of length {}",
+                        read.read_id, read_nodes, read.read_start, read.read_end, entry.2.len()
+                    );
                 }
+                
+
                 entry.1 = entry.2.iter().map(|x| *x as usize).sum();
                 entry.0 = if entry.1 == nodes_len[start_node] as usize { 1 } else { 0 };
             }
@@ -1636,7 +1646,7 @@ fn abundance_est(args: &ProfileArgs, hap_metrics_vec: &[HapMetrics]) -> Result<(
                 col("strain_taxid"),
                 col("genome_ID"),
                 col("predicted_coverage").round(2),
-                col("predicted_abundance").round(2),
+                col("predicted_abundance"),
                 col("path_base_cov").round(2),
                 col("unique_trio_fraction").round(2),
                 col("uniq_trio_cov_mean").round(2),
