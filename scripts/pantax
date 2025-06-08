@@ -7,7 +7,7 @@ function print_help() {
   echo ""
   echo "Strain-level metagenomic profiling using pangenome graphs with PanTax"
   echo ""
-  echo "Author: Weihai Zhang"
+  echo "Author: Wenhai Zhang"
   echo "Date:   May 2024"
   echo ""
   echo "    General options:"
