@@ -562,13 +562,17 @@ fn load_species_range(args: &ProfileArgs, input_file: &InputFile, species_profil
     };
 
     let ds_filtered_species_range_df = if let Some(species_str) = &args.designated_species {
-        let species_vec: Vec<&str> = species_str
-            .split(',')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .collect();  
-        let designated_species_series = Series::new("designated_species_series".into(), species_vec);
-        mode_filtered_species_range_df.filter(col("species").is_in(lit(designated_species_series))) 
+        if !species_str.trim().is_empty() && species_str != "None" {
+            let species_vec: Vec<&str> = species_str
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();  
+            let designated_species_series = Series::new("designated_species_series".into(), species_vec);
+            mode_filtered_species_range_df.filter(col("species").is_in(lit(designated_species_series)))
+        } else {
+            mode_filtered_species_range_df
+        }
     } else {
         mode_filtered_species_range_df
     };
@@ -1709,17 +1713,19 @@ pub fn profile(args: ProfileArgs) -> Result<(), Box<dyn std::error::Error>> {
         // let column_names = rcls_df.get_column_names();
         // println!("Column names: {:?}", column_names);
         if let Some(out_binning_file) = &args.out_binning_file {
-            let mut selected_rcls_df = rcls_df
-                .clone()
-                .lazy()
-                .select([
-                    col("read_id"),
-                    col("mapq"),
-                    col("species"),
-                    col("read_len")
-                ])
-                .collect()?;
-            save_output_to_file(&mut selected_rcls_df, &out_binning_file, false)?;
+            if out_binning_file != Path::new("None")  {
+                let mut selected_rcls_df = rcls_df
+                    .clone()
+                    .lazy()
+                    .select([
+                        col("read_id"),
+                        col("mapq"),
+                        col("species"),
+                        col("read_len")
+                    ])
+                    .collect()?;
+                save_output_to_file(&mut selected_rcls_df, &out_binning_file, false)?;
+            }
         }
         let filter_unmapped_rcls_df = rcls_df
             .clone()
@@ -1774,8 +1780,14 @@ pub fn profile(args: ProfileArgs) -> Result<(), Box<dyn std::error::Error>> {
             .filter(col("species").neq(lit("U")))
             .collect()?;
 
+        let schema = Schema::from_iter(vec![
+            Field::new("species_taxid".into(), DataType::String),
+            Field::new("predicted_abundance".into(), DataType::Float64),
+            Field::new("predicted_coverage".into(), DataType::Float64),
+        ]);
         let species_profile_df = LazyCsvReader::new(input_file.species_abund_file.as_ref().unwrap())
             .with_has_header(true)
+            .with_schema(Some(Arc::new(schema)))
             .with_separator(b'\t')
             .finish()?
             .collect()?;

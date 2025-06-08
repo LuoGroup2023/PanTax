@@ -40,7 +40,7 @@ pub struct ProfileArgs {
     #[clap(short = 'm', long = "gaf", help_heading = "SPECIES PROFILE INPUT FILE", help = "Mapping gaf file.")]
     pub input_aln_file: Option<PathBuf>,
 
-    #[clap(short = 'l', long = "len", help_heading = "SPECIES PROFILE INPUT FILE", help = "Average genome length of species file.")]
+    #[clap(short = 'l', long = "len", help_heading = "SPECIES PROFILE INPUT FILE", help = "Average genome length of species file. (Optional, default included in db)")]
     pub species_len_file: Option<PathBuf>,
 
     #[clap(short = 'b', long = "bin", help_heading = "STRAIN PROFILE INPUT FILE", help = "Read binning file from species profiling.")]

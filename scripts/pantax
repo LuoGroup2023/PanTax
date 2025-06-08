@@ -108,7 +108,7 @@ long_read_type=""
 
 species_level_flag="False"
 strain_level_flag="False"
-select_mode="all"
+select_mode="2"
 parallel_poa="True"
 designated_species=None
 isfilter=1
@@ -136,7 +136,7 @@ interleaved_short_read="False"
 input_fq=""
 input_fq1=""
 input_fq2=""
-pantax_report=pantax_report.tsv
+pantax_report=None
 #Print help if no argument specified
 if [[ "$1" == "" ]]; then
   print_help
@@ -162,7 +162,7 @@ while [[ "$1" != "" ]]; do
         "-e") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pangenome_building_tool="$2"; shift 2; } ;;
         "--parallel") parallel_build=$2; shift 2;;
         "-A" | "--ani") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { ani_threshold="$2"; shift 2; } ;;
-        "--mode") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { mode="$2"; shift 2; } ;;
+        # "--mode") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { mode="$2"; shift 2; } ;;
         "--fast") mode="1"; shift 1;;
 
         "--index") create_index="True"; shift 1;;
@@ -263,11 +263,13 @@ if [[ ( $mode == "0" && $create_db == "False" && $create_index == "False" ) || (
     fi
 fi
 
-if [ $isfilter == 0 ] || [ $isfilter == "off" ]; then
-    isfilter_flag=0
-else 
-    isfilter_flag=1
-fi
+# if [ $isfilter == 0 ] || [ $isfilter == "off" ]; then
+#     # isfilter_flag=0
+#     isfilter_flag=""
+# else 
+#     # isfilter_flag=1
+#     isfilter_flag="--filtered"
+# fi
 
 if [ $create_db == "False" ] && [ $create_index == "False" ] && [ $query_and_filter == "False" ]; then
     echo "Main parameters settings:"
@@ -308,11 +310,12 @@ script_dir=$(dirname $script_path)
 if [ $conda_run_flag == "True" ]; then
     # tools_dir=$script_dir/tools
     tools_dir=$script_dir
-    fastix=$tools_dir/fastix
+    # fastix=$tools_dir/fastix
 else
     tools_dir=$(dirname $script_dir)/tools
-    fastix=$tools_dir/fastix/bin/fastix
+    # fastix=$tools_dir/fastix/bin/fastix
 fi
+pantaxr=$script_dir/pantaxr
 if [ ! -z $vg ] && [ -f $vg ]; then
     :
 elif [ -z $vg ]; then
@@ -411,7 +414,7 @@ if [ $reconstruction_flag == "True" ]; then
     python $script_dir/prepare_building.py $genomes_info $wd $tmp_dir
     gfa_build_dir=$tmp_dir/gfa_build
     # first step: build pangenome for the species with more than two genomes
-    python $script_dir/task_scheduling.py $gfa_build_dir $tmp_dir/species_pangenome $fastix $vg -t $threads -v $verbose -f $force -e $pangenome_building_tool -d $debug -p $parallel_build -g $save
+    python $script_dir/task_scheduling.py $gfa_build_dir $tmp_dir/species_pangenome $pantaxr $vg -t $threads -v $verbose -f $force -e $pangenome_building_tool -d $debug -p $parallel_build -g $save
 
     # second step: build variation graph for the species with one genomes
     python $script_dir/build_graph.py species_eq1_genomes.txt $gfa_build_dir
@@ -458,6 +461,9 @@ if [ $reconstruction_flag == "True" ]; then
         find $gfa_build_dir -name "*gfa" -exec bash -c 'input=$1; tmp_dir=$2; name=$(basename $input); mv $input $tmp_dir/species_gfa/' _ {} $tmp_dir \;
         mv $tmp_dir/species_gfa reference_pangenome* species_range.txt $pantax_db
     fi
+    if [ ! -f $pantax_db/species_genomes_stats.txt ]; then
+        $pantaxr stat -g $pantax_db/genomes_info.txt -t $threads -o $pantax_db/species_genomes_stats.txt
+    fi
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Building reference pangenome completely."
 else
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Reference_pangenome.gfa exists. Skipping."
@@ -472,6 +478,9 @@ if [ -f $script_dir/mark_pangenome_eq1.py ]; then
         exit 0
     fi
 fi
+if [ ! -f $pantax_db/species_genomes_stats.txt ]; then
+    $pantaxr stat -g $pantax_db/genomes_info.txt -t $threads -o $pantax_db/species_genomes_stats.txt
+fi 
 
 if [ $create_db == "True" ] && [ $create_index == "False" ];then
     cd ..
@@ -494,7 +503,9 @@ if [ $create_index == "True" ] && [ ! -e $pantax_db/reference_pangenome.min ]; t
     mv reference_pangenome* $pantax_db    
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Construct index.... done"
 else
-    echo "$(date "+%Y-%m-%d %H:%M:%S") - Giraffe index exists. Skipping." 
+    if [ $short_reads == "True" ]; then
+        echo "$(date "+%Y-%m-%d %H:%M:%S") - Giraffe index exists. Skipping." 
+    fi
 fi
 
 if [ $create_index == "True" ];then
@@ -566,87 +577,96 @@ if [ $species_level_flag == "True" ] && [ $long_reads == "True" ] && [ $long_rea
     fi         
 fi
 
-# ---------------------------- Reads classification(binning) ----------------------------
-if [ $species_level_flag == "True" ] && [ -f "gfa_mapped.gaf" ] && [ -f $pantax_db/species_range.txt ]; then
-    echo "$(date "+%Y-%m-%d %H:%M:%S") - Read classification..."
-    if [ ! -s reads_classification.tsv ]; then
-        python $script_dir/read_classification.py -s $pantax_db/species_range.txt -m gfa_mapped.gaf 
-        echo "$(date "+%Y-%m-%d %H:%M:%S") - Read classification... done."
-    else
-        echo "$(date "+%Y-%m-%d %H:%M:%S") - reads_classification.tsv exists. Skipping."
-    fi
+
+if [ $isfilter == 0 ] || [ $isfilter == "off" ]; then
+    isfilter_flag=""
+else 
+    isfilter_flag="--filtered"
 fi
 
-# ---------------------------- species level binning and profiling ----------------------------
+if [ $sample_test == 1 ]; then
+    sample_test="--sample_test"
+else
+    sample_test=""
+fi
+
+if [ $next_for_strain == "True" ] || [ $debug == "True" ]; then
+    if [ $pantax_report == "None" ]; then
+        pantax_report="reads_classification.tsv"
+    fi
+fi
 if [ $species_level_flag == "True" ]; then
-    echo "$(date "+%Y-%m-%d %H:%M:%S") - Species abundance estimation..."
-    if [ ! -s species_abundance.txt ]; then
-        if [ $short_reads == "True" ]; then
-            python $script_dir/species_abundance_cal.py $genomes_info reads_classification.tsv short -ft $isfilter_flag $wd
-        elif [ $long_reads == "True" ]; then
-            python $script_dir/species_abundance_cal.py $genomes_info reads_classification.tsv long -ft $isfilter_flag $wd
-        fi
-        echo "$(date "+%Y-%m-%d %H:%M:%S") - Species abundance estimation... done."
-    else
-        echo "$(date "+%Y-%m-%d %H:%M:%S") - species_abundance.txt exists. Skipping."
-    fi
-fi 
-
-# ---------------------------- strain level binning and profiling ----------------------------
+    species_flag="--species"
+else
+    species_flag=""
+fi
 if [ $strain_level_flag == "True" ]; then
-    echo "$(date "+%Y-%m-%d %H:%M:%S") - Strain abundance estimation..."
-    line_count=$(wc -l < $pantax_db/species_range.txt)
-    if [ $unique_trio_nodes_fraction == "None" ] || [ $unique_trio_nodes_count == "None" ]; then
-        if [ $unique_trio_nodes_fraction == "None" ]; then
-            if [[ $line_count -eq 1 && $unique_trio_nodes_fraction = "None" ]]; then
-                unique_trio_nodes_fraction=0.43
-                parallel_poa=false
-            else
-                unique_trio_nodes_fraction=$default_unique_trio_nodes_fraction
-            fi  
-        fi 
-        if [ $unique_trio_nodes_count == "None" ]; then
-            if [[ $line_count -eq 1 && $unique_trio_nodes_count = "None" ]]; then
-                # unique_trio_nodes_count=0.44
-                unique_trio_nodes_count=$default_unique_trio_nodes_count
-                parallel_poa=false
-            else
-                unique_trio_nodes_count=$default_unique_trio_nodes_count
-            fi   
-        fi        
-    fi
-    if [ $single_cov_ratio == "None" ]; then
-        if [[ $line_count -eq 1 && $single_cov_ratio = "None" ]]; then
-            # single_cov_ratio=0.90
-            single_cov_ratio=$default_single_cov_ratio
-            parallel_poa=false
+    strain_flag="--strain"
+else
+    strain_flag=""
+fi
+if [ $debug == "True" ]; then
+    debug_flag="--debug"
+else
+    debug_flag=""
+fi
+
+# strain paras
+line_count=$(wc -l < $pantax_db/species_range.txt)
+if [ $unique_trio_nodes_fraction == "None" ] || [ $unique_trio_nodes_count == "None" ]; then
+    if [ $unique_trio_nodes_fraction == "None" ]; then
+        if [[ $line_count -eq 1 && $unique_trio_nodes_fraction = "None" ]]; then
+            unique_trio_nodes_fraction=0.43
         else
-            single_cov_ratio=$default_single_cov_ratio
+            unique_trio_nodes_fraction=$default_unique_trio_nodes_fraction
+        fi  
+    fi 
+    if [ $unique_trio_nodes_count == "None" ]; then
+        if [[ $line_count -eq 1 && $unique_trio_nodes_count = "None" ]]; then
+            # unique_trio_nodes_count=0.44
+            unique_trio_nodes_count=$default_unique_trio_nodes_count
+        else
+            unique_trio_nodes_count=$default_unique_trio_nodes_count
         fi   
-    fi  
-    if [ $shift_unique_trio_nodes_fraction == "None" ]; then
-        if [ $line_count -eq 1 ]; then
-            shift_unique_trio_nodes_fraction="True"
-        else
-            shift_unique_trio_nodes_fraction="False"
-        fi
-    fi
-    if [ $short_reads == "True" ]; then
-        read_type=short
-    elif [ $long_reads == "True" ]; then
-        read_type=long
-    fi
-    if [ ! -s strain_abundance.txt ]; then
-        if [ $verbose == "True" ]; then
-            /usr/bin/time -v -o strain_abundance_est_time.log python $script_dir/strain_abundance_cal.py -a $species_abund_threshold -fr $unique_trio_nodes_fraction -fc $unique_trio_nodes_count -sh $shift_unique_trio_nodes_fraction -sd $single_cov_diff -sr $single_cov_ratio -c $min_cov -d $min_depth -t $threads -gt $gurobi_threads --sample $sample --sample_test $sample_test -v -m $select_mode -p $parallel_poa -ds $designated_species -rt $read_type $pantax_db $genomes_info reads_classification.tsv gfa_mapped.gaf $pantax_db/species_range.txt species_abundance.txt 
-        else
-            /usr/bin/time -v -o strain_abundance_est_time.log python $script_dir/strain_abundance_cal.py -a $species_abund_threshold -fr $unique_trio_nodes_fraction -fc $unique_trio_nodes_count -sh $shift_unique_trio_nodes_fraction -sd $single_cov_diff -sr $single_cov_ratio -c $min_cov -d $min_depth -t $threads -gt $gurobi_threads --sample $sample --sample_test $sample_test -m $select_mode -p $parallel_poa -ds $designated_species -rt $read_type $pantax_db $genomes_info reads_classification.tsv gfa_mapped.gaf $pantax_db/species_range.txt species_abundance.txt 
-        fi
-        echo "$(date "+%Y-%m-%d %H:%M:%S") - Strain abundance estimation... done."
+    fi        
+fi
+if [ $single_cov_ratio == "None" ]; then
+    if [[ $line_count -eq 1 && $single_cov_ratio = "None" ]]; then
+        # single_cov_ratio=0.90
+        single_cov_ratio=$default_single_cov_ratio
     else
-        echo "$(date "+%Y-%m-%d %H:%M:%S") - strain_abundance.txt exists. Skipping."
+        single_cov_ratio=$default_single_cov_ratio
+    fi   
+fi  
+if [ $shift_unique_trio_nodes_fraction == "None" ]; then
+    if [ $line_count -eq 1 ]; then
+        shift_unique_trio_nodes_fraction="--shift"
+    else
+        shift_unique_trio_nodes_fraction=""
     fi
 fi
+
+# profiling opt and cmd
+pantaxr_opt="-d $pantax_db -w ./ -m gfa_mapped.gaf \
+                $isfilter_flag \
+                --min_species_abundance $species_abund_threshold \
+                -f $unique_trio_nodes_fraction \
+                -r $unique_trio_nodes_count \
+                --scr $single_cov_ratio \
+                --scd $single_cov_diff \
+                --mmcov 0 \
+                -c $min_cov \
+                --min_depth $min_depth \
+                --binning_out $pantax_report \
+                --sample $sample \
+                --ds $designated_species \
+                --mode $select_mode \
+                --full \
+                -o ./ \
+                --gthreads $gurobi_threads \
+                -t $threads \
+                $shift_unique_trio_nodes_fraction $sample_test $species_flag $strain_flag $debug_flag"
+$pantaxr profile $pantaxr_opt
 
 # move and rename files
 cd ..
@@ -677,7 +697,9 @@ if [[ ( $strain_level_flag == "True" && $next_for_strain == "True" ) || ( $speci
     fi
 
     if [ $debug == "False" ]; then
-        mv $tmp_dir/reads_classification.tsv $pantax_report
+        if [ -f $tmp_dir/pantax_report.tsv ]; then
+            mv $tmp_dir/pantax_report.tsv $pantax_report
+        fi
         rm -rf $tmp_dir
     fi
 fi

@@ -211,7 +211,8 @@ pub fn fastixe(args: FastixeArgs) -> Result<(), Box<dyn std::error::Error>> {
     create_dir_all(&args.out_directory)?;
     let mut merged_path = Path::new(&args.out_directory).join(&args.merge_output_file_path);
     if args.merge_bgzip_output {
-        merged_path.set_extension("gz");
+        // merged_path.set_extension("gz");
+        merged_path = std::path::PathBuf::from(format!("{}.gz", merged_path.display()));
     };
     process_all_fasta_and_merge(&args,&input_genomes, &merged_path)?;
     build(&merged_path).expect("Failed to build FASTA index"); 

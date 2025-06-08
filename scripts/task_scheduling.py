@@ -139,29 +139,33 @@ class TaskScheduling:
             cmd.append(cmd1)
             with open(pan_species_file, "r") as f:
                 genomes = [line.strip() for line in f]
+            # print(pan_species_file)
+            # print(genomes)
             genomes_num = len(genomes)
             threads = int(self.get_max_cores_based_on_genomes(genomes_num))
             if "pggb" in self.pangenome_building_exe.lower():
-
-                cmd_tmp_list = []
-                new_genomes_path = []
-                for genome in genomes:
-                    genome_name = Path(genome).name
-                    genome_name = "_".join(genome_name.split("_")[:2])
-                    if genome.endswith("gz"):
-                        gunzip_genome_name = Path(genome).name.replace(".gz", "")
-                        cmd_tmp_list.append(f"gunzip -c {genome} > {self.wd}/{species}/{gunzip_genome_name}; {self.fastix} {self.wd}/{species}/{gunzip_genome_name} -p '{genome_name}#1#' > {self.wd}/{species}/{genome_name}.fa")
-                    else:
-                        cmd_tmp_list.append(f"{self.fastix} {genome} -p '{genome_name}#1#' > {self.wd}/{species}/{genome_name}.fa") 
-                    new_genomes_path.append(f"{self.wd}/{species}/{genome_name}.fa")
-                cmd_tmp = "\n".join(cmd_tmp_list)
-                cmd2 = f"echo '{cmd_tmp}' | xargs -I{{}} -P {threads} bash -c '{{}}'"
-                cmd.append(cmd2)
-                all_new_genomes_path = " ".join(new_genomes_path)
-                cmd3 = f"cat {all_new_genomes_path} | bgzip -c -@ {threads} > {self.wd}/{species}/{species}_merged.fa.gz"
-                cmd.append(cmd3)
-                cmd4 = f"samtools faidx {self.wd}/{species}/{species}_merged.fa.gz"
-                cmd.append(cmd4)
+                cmd_tmp = f"{self.pantaxr} fastixe -l {pan_species_file} -b -o {self.wd}/{species} -e {species}_merged.fa --up"
+                # print(cmd_tmp)
+                cmd.append(cmd_tmp)
+                # cmd_tmp_list = []
+                # new_genomes_path = []
+                # for genome in genomes:
+                #     genome_name = Path(genome).name
+                #     genome_name = "_".join(genome_name.split("_")[:2])
+                #     if genome.endswith("gz"):
+                #         gunzip_genome_name = Path(genome).name.replace(".gz", "")
+                #         cmd_tmp_list.append(f"gunzip -c {genome} > {self.wd}/{species}/{gunzip_genome_name}; {self.fastix} {self.wd}/{species}/{gunzip_genome_name} -p '{genome_name}#1#' > {self.wd}/{species}/{genome_name}.fa")
+                #     else:
+                #         cmd_tmp_list.append(f"{self.fastix} {genome} -p '{genome_name}#1#' > {self.wd}/{species}/{genome_name}.fa") 
+                #     new_genomes_path.append(f"{self.wd}/{species}/{genome_name}.fa")
+                # cmd_tmp = "\n".join(cmd_tmp_list)
+                # cmd2 = f"echo '{cmd_tmp}' | xargs -I{{}} -P {threads} bash -c '{{}}'"
+                # cmd.append(cmd2)
+                # all_new_genomes_path = " ".join(new_genomes_path)
+                # cmd3 = f"cat {all_new_genomes_path} | bgzip -c -@ {threads} > {self.wd}/{species}/{species}_merged.fa.gz"
+                # cmd.append(cmd3)
+                # cmd4 = f"samtools faidx {self.wd}/{species}/{species}_merged.fa.gz"
+                # cmd.append(cmd4)
 
             if self.is_show_detailed_log:
                 time_log = f"/usr/bin/time -v -o {self.wd}/{species}/{species}_pangenome_building_time.log "
@@ -402,7 +406,8 @@ def main():
     parser = argparse.ArgumentParser(prog="multi_tasks_parallel.py", description=usage)
     parser.add_argument("wd", type=str, help="Pangenome building directory.")
     parser.add_argument("pan_species", type=str, help="Pangenome species information directory.")
-    parser.add_argument("fastix", type=str, help="Fastix executable file.")
+    # parser.add_argument("fastix", type=str, help="Fastix executable file.")
+    parser.add_argument("pantaxr", type=str, help="pantaxr executable file.")
     parser.add_argument("vg", type=str, help="Vg executable file.")
     parser.add_argument("-e", "--pangenome_building_exe", type=str, default="pggb", help="Pangenome building executable file(PGGB, Minigraph-Cactus).")
     parser.add_argument("-r", "--reference", type=str, help="Reference genomes for each species(Minigraph-Cactus need).")

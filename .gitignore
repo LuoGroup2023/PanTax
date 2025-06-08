@@ -8,6 +8,8 @@ tools/gurobipy-11.0.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
 v1.0.0
 pantax_conda
 synchronous.sh
-scripts/pantaxr/tests
-scripts/pantaxr/target
-scripts/pantaxr/genomes
+pantaxr/tests
+pantaxr/target
+pantaxr/genomes
+scripts/pantaxr
+scripts/old_scripts
