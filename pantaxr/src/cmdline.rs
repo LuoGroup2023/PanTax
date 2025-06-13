@@ -25,6 +25,8 @@ pub enum Mode {
     Zip(ZipArgs),
     #[clap(arg_required_else_help = true, display_order = 6)]
     Range(SortRangeArgs),
+    #[clap(arg_required_else_help = true, display_order = 7)]
+    Filter(GafFilterArgs),
 }
 
 #[derive(Args, Default, Debug)]
@@ -275,4 +277,13 @@ pub struct SortRangeArgs {
     #[clap(short = 't', long = "threads", default_value_t = 1, help_heading = "Range Count ONLY", help = "Number of threads.")]
     pub threads: usize,
 
+}
+
+#[derive(Args, Default, Debug)]
+pub struct GafFilterArgs {
+    #[clap(short = 'm', long = "gaf", help_heading = "INPUT FILE", help = "Mapping gaf file.")]
+    pub input_aln_file: PathBuf, 
+
+    #[clap(short = 't', long = "threads", default_value_t = 1, help = "Number of threads.")]
+    pub threads: usize,
 }

@@ -6,6 +6,7 @@ use pantaxr::profile;
 use pantaxr::stat;
 use pantaxr::zip;
 use pantaxr::sort_range;
+use pantaxr::gaf_filter;
 use clap::Parser;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -17,6 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Mode::Stat(stat_args) => stat::stat(stat_args),
         Mode::Zip(zip_args) => zip::zip(zip_args),
         Mode::Range(sort_range_args) => sort_range::sort_range(sort_range_args),
+        Mode::Filter(gaf_filter_args) => gaf_filter::gaf_filter(gaf_filter_args),
     }
 
 }
