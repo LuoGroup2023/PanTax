@@ -7,3 +7,4 @@ pub mod stat;
 pub mod zip;
 pub mod sort_range;
 pub mod gaf_filter;
+pub mod build_eq1;

@@ -433,7 +433,7 @@ if [ $reconstruction_flag == "True" ]; then
     python $script_dir/task_scheduling.py $gfa_build_dir $tmp_dir/species_pangenome $pantaxr $vg -t $threads -v $verbose -f $force -e $pangenome_building_tool -d $debug -p $parallel_build -g $save -o $tmp_dir/species_range.txt $lz_flag $zstd_flag
 
     # second step: build variation graph for the species with one genomes
-    python $script_dir/build_graph.py species_eq1_genomes.txt $gfa_build_dir
+    $pantaxr build -i species_eq1_genomes.txt -w $gfa_build_dir
     if [ $debug == "False" ]; then
         rm -rf $tmp_dir/species_pangenome $tmp_dir/species_eq1_genomes.txt
     fi
@@ -593,7 +593,6 @@ if [ $species_level_flag == "True" ] && [ $long_reads == "True" ] && [ $long_rea
     if [ ! -s gfa_mapped.gaf ]; then
         GraphAligner -g $pantax_db/reference_pangenome.gfa -f $input_fq -a gfa_mapped.gaf -x vg -t $threads --precise-clipping $precise
         # GraphAligner -g $pantax_db/reference_pangenome.gfa -f $input_fq -a gfa_mapped.gaf -x vg -t $threads --bandwidth 15 --multimap-score-fraction 0.99 --precise-clipping 0.66 --min-alignment-score 100 --clip-ambiguous-ends 100 --overlap-incompatible-cutoff 0.15 --max-trace-count 5 --mem-index-no-wavelet-tree
-        # python $script_dir/gaf_filter.py -i gfa_mapped.gaf
         $pantaxr filter -m gfa_mapped.gaf -t $threads
         mv gfa_mapped_filtered.gaf gfa_mapped.gaf
         echo "$(date "+%Y-%m-%d %H:%M:%S") - Graphaligner mapping... done."

@@ -14,3 +14,4 @@ pantaxr/genomes
 pantaxr/Cargo.lock
 scripts/pantaxr
 scripts/old_scripts
+tests

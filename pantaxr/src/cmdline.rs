@@ -27,6 +27,8 @@ pub enum Mode {
     Range(SortRangeArgs),
     #[clap(arg_required_else_help = true, display_order = 7)]
     Filter(GafFilterArgs),
+    #[clap(arg_required_else_help = true, display_order = 8)]
+    Build(BuildArgs),
 }
 
 #[derive(Args, Default, Debug)]
@@ -286,4 +288,13 @@ pub struct GafFilterArgs {
 
     #[clap(short = 't', long = "threads", default_value_t = 1, help = "Number of threads.")]
     pub threads: usize,
+}
+
+#[derive(Args, Default, Debug)]
+pub struct BuildArgs {
+    #[clap(short = 'i', long = "species_eq1_genomes_info", help_heading = "INPUT", help = "Species eq1 genomes information file. Format: species_taxid\\tID\\n.")]
+    pub species_eq1_genomes_info: PathBuf,    
+
+    #[clap(short = 'w', long = "wd", help_heading = "INPUT", help = "Work directory.")]
+    pub wd: PathBuf,    
 }
