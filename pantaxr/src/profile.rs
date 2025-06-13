@@ -1036,7 +1036,7 @@ fn first_filter_paths(
                     filter_non_zero_frequencies.iter().sum::<f64>() / filter_non_zero_frequencies.len() as f64
                 };
                 let shift_unique_trio_nodes_fraction = if frequencies_mean >= 1.0 {
-                    let _shift_unique_trio_nodes_fraction = unique_trio_nodes_fraction + (0.8-unique_trio_nodes_fraction) * frequencies_mean / 100.0;
+                    let _shift_unique_trio_nodes_fraction = args.unique_trio_nodes_fraction + (0.8-args.unique_trio_nodes_fraction) * frequencies_mean / 100.0;
                     if _shift_unique_trio_nodes_fraction > 0.8 {
                         0.8
                     } else {
