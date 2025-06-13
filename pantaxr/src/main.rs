@@ -4,6 +4,8 @@ use pantaxr::fastixe;
 use pantaxr::rcls;
 use pantaxr::profile;
 use pantaxr::stat;
+use pantaxr::zip;
+use pantaxr::sort_range;
 use clap::Parser;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -13,6 +15,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Mode::Fastixe(fastixe_args) => fastixe::fastixe(fastixe_args),
         Mode::Rcls(rcls_args) => rcls::rcls(rcls_args),
         Mode::Stat(stat_args) => stat::stat(stat_args),
+        Mode::Zip(zip_args) => zip::zip(zip_args),
+        Mode::Range(sort_range_args) => sort_range::sort_range(sort_range_args),
     }
 
 }

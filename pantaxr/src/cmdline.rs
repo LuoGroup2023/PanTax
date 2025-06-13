@@ -21,6 +21,10 @@ pub enum Mode {
     Rcls(RclsArgs),
     #[clap(arg_required_else_help = true, display_order = 4)]
     Stat(StatArgs),
+    #[clap(arg_required_else_help = true, display_order = 5)]
+    Zip(ZipArgs),
+    #[clap(arg_required_else_help = true, display_order = 6)]
+    Range(SortRangeArgs),
 }
 
 #[derive(Args, Default, Debug)]
@@ -111,6 +115,9 @@ pub struct ProfileArgs {
 
     #[clap(long="filtered", help_heading = "SPECIES PROFILE PARAS OPTIONS", help = "MAPQ-based filtered.")]
     pub filtered: bool,
+
+    #[clap(long="zip", help = "Graph information format for reading.")]
+    pub zip: Option<String>,   
     
     #[clap(long="force", help = "Force rerun.")]
     pub force: bool,
@@ -202,5 +209,70 @@ pub struct StatArgs {
 
     #[clap(short = 'o', long = "out", default_value = "genome_statics.txt", help_heading = "OUTPUT", help = "Output file name.")]
     pub output_name: PathBuf,
+
+}
+
+#[derive(Args, Default, Debug)]
+pub struct ZipArgs {
+    #[clap(short = 'i', long = "input_gfa", help_heading = "INPUT FILE", help = "Input gfa file.")]
+    pub input_gfa: Option<PathBuf>,
+
+    #[clap(short = 'l', long = "input_gfa_list", help_heading = "INPUT FILE", help = "Input gfa list.")]
+    pub input_gfa_list: Option<PathBuf>,     
+
+    #[clap(short = 'o', long = "out", default_value = "species_graph_info", help_heading = "OUTPUT", help = "Output directory name.")]
+    pub output_dir: PathBuf,
+
+    #[clap(short = 'f', long = "range", default_value = "species_range.txt", help_heading = "OUTPUT", help = "Output file name." )]
+    pub output_range_file: PathBuf,
+
+
+    #[clap(short, long="serialize", help_heading = "ZIP", help = "Serialized output.")]
+    pub serialized: bool,  
+
+    #[clap(long="lz", help_heading = "ZIP", help = "Lz4 compressed output.")]
+    pub lz: bool,   
+
+    #[clap(long="zstd", help_heading = "ZIP", help = "Zstd compressed output.")]
+    pub zstd: bool,
+
+    #[clap(long="lvl", default_value_t = 3, help_heading = "ZIP", help = "Compressed level (Only support for zstd).")]
+    pub compress_lvl: i32,
+
+    #[clap(short = 't', long = "threads", default_value_t = 1, help_heading = "ZIP", help = "Number of threads.")]
+    pub threads: usize,
+
+    #[clap(short, long = "decompress", help_heading = "UNZIP", help = "Decompress")]
+    pub decompress: bool,
+
+    #[clap(long="trace", help = "Trace output (caution: very verbose).")]
+    pub trace: bool,
+    #[clap(long="debug", help = "Debug output.")]
+    pub debug: bool,
+
+}
+
+#[derive(Args, Default, Debug)]
+pub struct SortRangeArgs {
+    #[clap(long = "pangenome_vg_files", help="Pangenome vg files.")]
+    pub pangenome_vg_files: PathBuf,
+
+    #[clap(short = 'f', long = "range", default_value = "species_range.txt", help_heading = "OUTPUT", help = "Output file name." )]
+    pub range_file: Option<PathBuf>,
+
+    #[clap(short, long = "count_only", help_heading = "Range Count ONLY", help = "Only obtain species range.")]
+    pub count_only: bool,
+
+    #[clap(long = "pangenome_ge2", help_heading = "Range Count ONLY", help="Pangenome ge2.")]
+    pub pangenome_ge2: Option<PathBuf>,    
+
+    #[clap(long = "pangenome_eq1", help_heading = "Range Count ONLY", help="Pangenome eq1.")]
+    pub pangenome_eq1: Option<PathBuf>, 
+
+    #[clap(long = "vg", help_heading = "Range Count ONLY", help="Vg path.")]
+    pub vg: Option<PathBuf>, 
+
+    #[clap(short = 't', long = "threads", default_value_t = 1, help_heading = "Range Count ONLY", help = "Number of threads.")]
+    pub threads: usize,
 
 }

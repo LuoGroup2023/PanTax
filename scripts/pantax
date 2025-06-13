@@ -26,6 +26,8 @@ function print_help() {
 #   echo "        --mode                            0 (use all genomes), 1 (use sylph filter genomes, dataset specificity)."
   echo "        --fast                            Create the database using genomes filtered by sylph query instead of all genomes."
   echo "        -g, --save                        Save species graph information."
+  echo "            --lz                          Serialized zip graph file saved with lz4 format (for save option)."
+  echo "            --zstd                        Serialized zip graph file saved with zstd format (for save option)."
   echo "        --force                           Force to rebuild pangenome."
   echo "        -e file                           Path to pangenome building tool executable file. (default: pggb)" 
   echo "        -A, --ani float                   ANI threshold for sylph query result filter. (default: 99)"                                  
@@ -90,6 +92,8 @@ debug="False"
 # Database creation
 create_db="False"
 save="False"
+lz=false
+zstd=false
 force="False"
 pangenome_building_tool="pggb"
 parallel_build="True"
@@ -157,7 +161,9 @@ while [[ "$1" != "" ]]; do
         "--version") echo $version; exit 0;;
 
         "--create") create_db="True"; shift 1;;
-        "-g" | "--save") save="True"; shift 1;;                
+        "-g" | "--save") save="True"; shift 1;; 
+        "--lz") lz=true; shift 1;;
+        "--zstd") zstd=true; shift 1;;     
         "--force") force="True"; shift 1;;
         "-e") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pangenome_building_tool="$2"; shift 2; } ;;
         "--parallel") parallel_build=$2; shift 2;;
@@ -414,7 +420,17 @@ if [ $reconstruction_flag == "True" ]; then
     python $script_dir/prepare_building.py $genomes_info $wd $tmp_dir
     gfa_build_dir=$tmp_dir/gfa_build
     # first step: build pangenome for the species with more than two genomes
-    python $script_dir/task_scheduling.py $gfa_build_dir $tmp_dir/species_pangenome $pantaxr $vg -t $threads -v $verbose -f $force -e $pangenome_building_tool -d $debug -p $parallel_build -g $save
+    if [ $lz = true ]; then
+        lz_flag="--lz"
+    else
+        lz_flag=""
+    fi 
+    if [ $zstd = true ]; then
+        zstd_flag="--lz"
+    else
+        zstd_flag=""
+    fi 
+    python $script_dir/task_scheduling.py $gfa_build_dir $tmp_dir/species_pangenome $pantaxr $vg -t $threads -v $verbose -f $force -e $pangenome_building_tool -d $debug -p $parallel_build -g $save -o $tmp_dir/species_range.txt $lz_flag $zstd_flag
 
     # second step: build variation graph for the species with one genomes
     python $script_dir/build_graph.py species_eq1_genomes.txt $gfa_build_dir
@@ -422,10 +438,12 @@ if [ $reconstruction_flag == "True" ]; then
         rm -rf $tmp_dir/species_pangenome $tmp_dir/species_eq1_genomes.txt
     fi
     if [ $save == "True" ]; then
-        cat $gfa_build_dir/gfa_build_done.txt | xargs -I {} -P $(($threads/2)) bash -c 'vg=$1; gfa_build_dir=$2; script_dir=$3; input=$4; name=$(basename $input .gfa); $vg convert -g $input -p > $gfa_build_dir/$name.vg; python $script_dir/get_h5_from_gfa.py $input $gfa_build_dir/$name.h5' _ $vg $gfa_build_dir $script_dir {}
+        # cat $gfa_build_dir/gfa_build_done.txt | xargs -I {} -P $(($threads/2)) bash -c 'vg=$1; gfa_build_dir=$2; script_dir=$3; input=$4; name=$(basename $input .gfa); $vg convert -g $input -p > $gfa_build_dir/$name.vg; python $script_dir/get_h5_from_gfa.py $input $gfa_build_dir/$name.h5' _ $vg $gfa_build_dir $script_dir {}
+        cat $gfa_build_dir/gfa_build_done.txt | xargs -I {} -P $(($threads/2)) bash -c 'vg=$1; tmp_dir=$2; script_dir=$3; pantaxr=$4; input=$5; name=$(basename $input .gfa); $vg convert -g $input -p > $tmp_dir/gfa_build/$name.vg; $pantaxr zip -i $input -o $tmp_dir/gfa_build2/ -f $tmp_dir/species_range.txt' _ $vg $tmp_dir $script_dir $pantaxr {}
     elif [ $save == "False" ]; then
         cat $gfa_build_dir/gfa_build_done.txt | xargs -I {} -P $(($threads/2)) bash -c 'vg=$1; gfa_build_dir=$2; input=$3; name=$(basename $input .gfa); $vg convert -g $input -p > $gfa_build_dir/$name.vg' _ $vg $gfa_build_dir {}
     fi
+
     sed 's:.*/::; s/\.[^.]*$//' $gfa_build_dir/gfa_build_done.txt > $gfa_build_dir/pangenome_eq1.txt
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Completed all pangenome building commands for the species with only one genomes."
     # vg_files=$(ls $gfa_build_dir/*.vg)
@@ -444,17 +462,23 @@ if [ $reconstruction_flag == "True" ]; then
     echo $vg_files > vg_files.txt
     $vg combine -p $vg_files > reference_pangenome.vg
     $vg convert -f reference_pangenome.vg > reference_pangenome.gfa
+
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Obtain the mapping information of graph and species..."
-    python $script_dir/otu_range.py vg_files.txt $vg $gfa_build_dir/finished_pangenome.txt $gfa_build_dir/pangenome_eq1.txt -t $threads
+    if [ $save == "False" ]; then
+        $pantaxr range --count_only --pangenome_vg_files vg_files.txt --pangenome_ge2 $gfa_build_dir/finished_pangenome.txt --pangenome_eq1 $gfa_build_dir/pangenome_eq1.txt --vg $vg --range $tmp_dir/species_range.txt -t $threads
+    else 
+        $pantaxr range --pangenome_vg_files vg_files.txt --range $tmp_dir/species_range.txt
+    fi
+    # python $script_dir/otu_range.py vg_files.txt $vg $gfa_build_dir/finished_pangenome.txt $gfa_build_dir/pangenome_eq1.txt -t $threads
     # python $script_dir/otu_range.py reference_pangenome.gfa $genomes_info $gfa_build_dir/finished_pangenome.txt $gfa_build_dir/pangenome_eq1.txt --species-level -t $threads
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Obtain the mapping information of graph and species...done"
+    
     if [ $debug == "False" ]; then
         rm reference_pangenome.vg $vg_files
     fi
     # extract gfa files for strain abundance computing
     if [ $save == "True" ]; then
-        mkdir -p $pantax_db/species_graph_info
-        mv $gfa_build_dir/*h5 $pantax_db/species_graph_info
+        mv ${gfa_build_dir}2 $pantax_db/species_graph_info
         mv reference_pangenome* species_range.txt $pantax_db
     elif [ $save == "False" ]; then
         mkdir -p $tmp_dir/species_gfa
@@ -611,6 +635,16 @@ else
     debug_flag=""
 fi
 
+if [ $save == "True" ] && [ $lz = false ] && [ $zstd = false ]; then
+    save_flag="--zip serialize"
+elif [ $save == "True" ] && [ $lz = true ] && [ $zstd = false ]; then
+    save_flag="--zip lz"
+elif [ $save == "True" ] && [ $lz = false ] && [ $zstd = true ]; then
+    save_flag="--zip zstd"
+else 
+    save_flag=""
+fi
+
 # strain paras
 line_count=$(wc -l < $pantax_db/species_range.txt)
 if [ $unique_trio_nodes_fraction == "None" ] || [ $unique_trio_nodes_count == "None" ]; then
@@ -665,7 +699,7 @@ pantaxr_opt="-d $pantax_db -w ./ -m gfa_mapped.gaf \
                 -o ./ \
                 --gthreads $gurobi_threads \
                 -t $threads \
-                $shift_unique_trio_nodes_fraction $sample_test $species_flag $strain_flag $debug_flag"
+                $shift_unique_trio_nodes_fraction $sample_test $save_flag $species_flag $strain_flag $debug_flag"
 $pantaxr profile $pantaxr_opt
 
 # move and rename files

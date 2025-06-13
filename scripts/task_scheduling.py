@@ -98,6 +98,8 @@ class TaskScheduling:
 
         if self.save.lower() == "true":
             self.save = True
+            zip_gfa_build = f"{self.wd}2"
+            Path(zip_gfa_build).mkdir(exist_ok=True)
         else:
             self.save = False
 
@@ -192,7 +194,14 @@ class TaskScheduling:
             cmd6 = f"{self.vg} convert -g {self.wd}/{species}/species{species}_pangenome_building/*gfa -p -t {threads} > {self.wd}/{species}.vg; mv {self.wd}/{species}/species{species}_pangenome_building/*gfa {self.wd}/{species}.gfa"
             cmd.append(cmd6)
             if self.save:
-                cmd_tmp = f"python {script_dir}/get_h5_from_gfa.py {self.wd}/{species}.gfa {self.wd}/{species}.h5; rm {self.wd}/{species}.gfa"
+                # cmd_tmp = f"python {script_dir}/get_h5_from_gfa.py {self.wd}/{species}.gfa {self.wd}/{species}.h5; rm {self.wd}/{species}.gfa"
+                options = ""
+                if self.debug: options += " --debug"
+                if self.lz4: options += " --lz"
+                elif self.zstd: options += " --zstd"
+                else: options += " --serialize"
+                cmd_tmp = f"{self.pantaxr} zip -i {self.wd}/{species}.gfa -o {self.wd}2 -f {self.range_file} -t {threads} {options}; rm {self.wd}/{species}.gfa"
+                # print(cmd_tmp)
                 cmd.append(cmd_tmp)
             if not self.debug:
                 cmd7 = f"rm -rf {self.wd}/{species}"
@@ -266,8 +275,13 @@ class TaskScheduling:
                     result = task.result()  # Get the result of the task
                     result_gfa = Path(self.wd) / f"{result}.gfa"
                     result_vg = Path(self.wd) / f"{result}.vg"
-                    result_h5 = Path(self.wd) / f"{result}.h5"
-                    if not ((is_file_non_empty(result_gfa) or is_file_non_empty(result_h5)) and is_file_non_empty(result_vg)):
+                    if self.lz4:
+                        result_serialized = Path(f"{self.wd}2") / f"{result}.bin.lz4"
+                    elif self.zstd:
+                        result_serialized = Path(f"{self.wd}2") / f"{result}.bin.zst"
+                    else:
+                        result_serialized = Path(f"{self.wd}2") / f"{result}.bin"
+                    if not ((is_file_non_empty(result_gfa) or is_file_non_empty(result_serialized)) and is_file_non_empty(result_vg)):
                         raise IOError(f"{result} gfa or vg files are either missing or empty.")
                     self.finished_pangenome_num += 1
                     current_percentage = self.finished_pangenome_num * 100 / self.pangenomes_need_to_build
@@ -412,7 +426,10 @@ def main():
     parser.add_argument("-e", "--pangenome_building_exe", type=str, default="pggb", help="Pangenome building executable file(PGGB, Minigraph-Cactus).")
     parser.add_argument("-r", "--reference", type=str, help="Reference genomes for each species(Minigraph-Cactus need).")
     parser.add_argument("-p", "--parallel", dest="parallel", type=str, default="True", help="Parallel task.")
-    parser.add_argument("-g", "--save", dest="save", type=str, default="False", help="Save GFA file information to h5 file.")
+    parser.add_argument("-g", "--save", dest="save", type=str, default="False", help="Save GFA file information to serialized zip file.")
+    parser.add_argument("-o", "--range_file", dest="range_file", type=str, help="The species range file (for save option).")
+    parser.add_argument("--lz", dest="lz4", action="store_true", help="Serialized zip file saved with lz4 format (for save option).")
+    parser.add_argument("--zstd", dest="zstd", action="store_true", help="Serialized zip file saved with zstd format (for save option).")
     parser.add_argument("-s", "--sleep", type=int, help="Parallel loop sleep time.")
     parser.add_argument("-t", "--threads", dest="threads", type=int, required=True, help="Max threads.")
     parser.add_argument("-f", "--force", dest="force", type=str, default="False", help="Force all to rebuild.")

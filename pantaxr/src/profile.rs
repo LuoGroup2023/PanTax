@@ -1,7 +1,7 @@
 
 use crate::{cmdline::ProfileArgs, rcls};
 use rcls::{save_output_to_file, load_gaf_file_lazy};
-
+use crate::zip::{load_from_zip_graph, CompressType};
 use log::*;
 use chrono::Local;
 use regex::Regex;
@@ -28,6 +28,7 @@ use nalgebra::{DMatrix, RowDVector};
 
 use rand::{SeedableRng, rngs::StdRng, seq::IndexedRandom};
 
+use bincode::{Encode, Decode};
 // use std::io::{BufWriter, Write}; 
 
 #[derive(Debug, Default, Clone)]
@@ -444,9 +445,12 @@ fn group_reads_by_species(df: &DataFrame) -> BTreeMap<String, Vec<Record>> {
     }
 }
 
-struct Graph {
-    nodes_len: Vec<i64>,
-    paths: BTreeMap<String, Vec<usize>>,
+
+
+#[derive(Debug, Encode, Decode)]
+pub struct Graph {
+    pub nodes_len: Vec<i64>,
+    pub paths: BTreeMap<String, Vec<usize>>,
 }
 
 fn read_gfa(gfa_file: &Path, previous: usize) -> Result<Graph, Box<dyn std::error::Error>> {
@@ -1401,15 +1405,38 @@ fn optimize_otu(args: &ProfileArgs, otu: &String, start: u32, end: u32, reads_cl
     log::debug!("Reading {} graph information, start: {}, end: {}", otu, start, end);
     let start = start - 1;
     let end = end - 1;
-    let species_gfa_dir = args.db.join("species_gfa");
-    let graph = if species_gfa_dir.exists() {
-        let gfa_file = species_gfa_dir.join(format!("{}.gfa", otu));
-        read_gfa(&gfa_file, 0).map_err(|e| format!("GFA read error: {}", e)).unwrap()
+    let species_gfa_dir = if args.zip.is_some() {
+        args.db.join("species_graph_info")
     } else {
-        // panic!("{:?} does not exist!", species_gfa_dir);
+        args.db.join("species_gfa")
+    };
+    
+    if !species_gfa_dir.exists() {
         eprintln!("{:?} does not exist! Skipping.", species_gfa_dir);
         return None;
+    }
+    
+    let gfa_file = match args.zip.as_deref() {
+        Some("serialize") => species_gfa_dir.join(format!("{}.bin", otu)),
+        Some("lz")        => species_gfa_dir.join(format!("{}.bin.lz4", otu)),
+        Some("zstd")      => species_gfa_dir.join(format!("{}.bin.zst", otu)),
+        _                 => species_gfa_dir.join(format!("{}.gfa", otu)),
     };
+
+    // debug!("{:?}", gfa_file);
+    
+    let graph = match args.zip.as_deref() {
+        Some("serialize") => load_from_zip_graph(&gfa_file, CompressType::Serialized)
+            .map_err(|e| format!("GFA read error: {}", e)).ok()?,
+        Some("lz")        => load_from_zip_graph(&gfa_file, CompressType::Lz4)
+            .map_err(|e| format!("GFA read error: {}", e)).ok()?,
+        Some("zstd")      => load_from_zip_graph(&gfa_file, CompressType::Zstd)
+            .map_err(|e| format!("GFA read error: {}", e)).ok()?,
+        _                 => read_gfa(&gfa_file, 0)
+            .map_err(|e| format!("GFA read error: {}", e)).ok()?,
+    };
+
+    // debug!("First 100 nodes_len: {:?}", &graph.nodes_len[..graph.nodes_len.len().min(100)]);
 
     let (unique_trio_nodes, unique_trio_nodes_len, hap2unique_trio_nodes_m) = trio_nodes_info(&graph);
     let (node_abundance_vec, trio_node_abundance_vec, node_base_cov) = get_node_abundances(otu, &graph.nodes_len, &unique_trio_nodes, &unique_trio_nodes_len, start as usize, &reads_cluster);

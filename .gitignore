@@ -11,5 +11,6 @@ synchronous.sh
 pantaxr/tests
 pantaxr/target
 pantaxr/genomes
+pantaxr/Cargo.lock
 scripts/pantaxr
 scripts/old_scripts

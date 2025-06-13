@@ -22,6 +22,10 @@ struct Stats {
 }
 
 fn stat_single_fasta(filename: PathBuf) -> Stats {
+    if !(filename.is_file() && filename.exists()) {
+        panic!("Error: {:?} does not exists", filename);
+    }
+
     let mut lengths = vec![];
     let mut total_gc = 0;
     let mut total_seq = 0;
