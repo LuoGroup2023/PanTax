@@ -1,6 +1,7 @@
 
 use crate::cmdline::ZipArgs;
 use crate::profile::Graph;
+use crate::clog::init_logger;
 use std::path::{Path, PathBuf};
 use std::fs::{OpenOptions, File, create_dir, read_to_string};
 use std::io::{BufRead, BufReader};
@@ -14,7 +15,6 @@ use zstd::stream::{Encoder, Decoder};
 use rayon::prelude::*;
 
 use log::*;
-use chrono::Local;
 use fs2::FileExt;
 use std::time::Duration;
 use std::thread::sleep;
@@ -121,19 +121,15 @@ impl CompressType {
 
 fn check_args_valid(args: &ZipArgs) -> std::io::Result<()> {
 
-    let level: LevelFilter;
-    if args.trace {
-        level = log::LevelFilter::Trace;
+    let level = if args.trace {
+        "trace"
     } else if args.debug {
-        level = log::LevelFilter::Debug;
+        "debug"
     } else {
-        level = log::LevelFilter::Info
-    }     
+        "info"
+    };
 
-    simple_logger::SimpleLogger::new()
-        .with_level(level)
-        .init()
-        .unwrap();
+    init_logger(level);
 
     if let Some(input_gfa_file) = &args.input_gfa {
         if !input_gfa_file.is_file() {
@@ -265,7 +261,7 @@ fn read_and_zip_gfa(gfa_file: &Path, previous: usize, output_dir: &Path, compres
                 );        
                 bincode::encode_into_std_write(&graph, &mut serialized_gfa_file, bincode::config::standard()).unwrap();
             } else {
-                debug!("{} - {:?} exists. Skipping.", Local::now().format("%Y-%m-%d %H:%M:%S"), zip_file)
+                debug!("- {:?} exists. Skipping.", zip_file)
             }
         },
         CompressType::Lz4 => {
@@ -284,7 +280,7 @@ fn read_and_zip_gfa(gfa_file: &Path, previous: usize, output_dir: &Path, compres
                 bincode::encode_into_std_write(&graph, &mut compressed_writer, bincode::config::standard())?;
                 compressed_writer.finish()?;
             } else {
-                debug!("{} - {:?} exists. Skipping.", Local::now().format("%Y-%m-%d %H:%M:%S"), zip_file)
+                debug!("- {:?} exists. Skipping.", zip_file)
             }
 
         },
@@ -298,7 +294,7 @@ fn read_and_zip_gfa(gfa_file: &Path, previous: usize, output_dir: &Path, compres
                 bincode::encode_into_std_write(&graph, &mut compressed_writer, bincode::config::standard())?;
                 compressed_writer.finish()?;
             } else {
-                debug!("{} - {:?} exists. Skipping.", Local::now().format("%Y-%m-%d %H:%M:%S"), zip_file)
+                debug!("- {:?} exists. Skipping.", zip_file)
             }
 
         },

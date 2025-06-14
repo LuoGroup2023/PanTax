@@ -2,8 +2,8 @@
 use crate::{cmdline::ProfileArgs, rcls};
 use rcls::{save_output_to_file, load_gaf_file_lazy};
 use crate::zip::{load_from_zip_graph, CompressType};
+use crate::clog::init_logger;
 use log::*;
-use chrono::Local;
 use regex::Regex;
 use rayon::prelude::*;
 
@@ -49,19 +49,15 @@ fn check_args_valid(args: &ProfileArgs, input_file: &mut InputFile) {
         panic!("Please choose profiling level with --species or/and --strain.");
     }
 
-    let level: LevelFilter;
-    if args.trace {
-        level = log::LevelFilter::Trace;
+    let level = if args.trace {
+        "trace"
     } else if args.debug {
-        level = log::LevelFilter::Debug;
+        "debug"
     } else {
-        level = log::LevelFilter::Info
-    }   
+        "info"
+    };
 
-    simple_logger::SimpleLogger::new()
-        .with_level(level)
-        .init()
-        .unwrap();
+    init_logger(level);
 
     rayon::ThreadPoolBuilder::new().num_threads(args.threads).build_global().unwrap();
 
@@ -776,13 +772,20 @@ fn get_node_abundances(
 
         // only one node, read is shorter than the node of the graph
         if start_node == end_node && read_nodes.len() == 1 {
-                // https://github.com/vgteam/vg/issues/4249
-                // S0R4490169/2    150     0       150     +       <77966596       1118    1010    551 
-                // the start position is beyond to end postion
-                // json alignment only displays offset which is the start position
-                // assert!(target_len as usize <= entry.2.len(), "read_id {} {:?} read len {} is longer than {} node len {}", read.read_id, read_nodes, target_len, start_node, entry.2.len() );
-                // very few, we filter them.
+            // https://github.com/vgteam/vg/issues/4249
+            // S0R4490169/2    150     0       150     +       <77966596       1118    1010    551 
+            // the start position is beyond to end postion
+            // json alignment only displays offset which is the start position
+            // assert!(target_len as usize <= entry.2.len(), "read_id {} {:?} read len {} is longer than {} node len {}", read.read_id, read_nodes, target_len, start_node, entry.2.len() );
+            // very few, we filter them.
+
+            // The old Python code did not make this judgment, resulting in a smaller node abundance. 
+            // Although these reads will be relatively small, sometimes the target_len will be large, especially for long reads
             if target_len < 0 {
+                debug!(
+                    "read: {}, read start: {}, read end: {}",
+                    read.read_id, read.read_start, read.read_end
+                );
                 return;
             }
             *read_nodes_len.entry(start_node).or_default() += target_len;
@@ -835,6 +838,14 @@ fn get_node_abundances(
                 }
             }
         }
+
+        // // for debug
+        // use std::io::Write;
+        // let file = File::create(format!("{otu}_base_aln.txt")).unwrap();
+        // let mut writer = std::io::BufWriter::new(file);
+        // for entry in bases_per_node.iter() {
+        //     writeln!(writer, "{}\t{}", entry.key(), entry.value()).unwrap();
+        // }
 
         if read_nodes.len() < 3 {
             return;
@@ -1132,14 +1143,14 @@ fn second_filter_paths(
             gurobi_opt_var.hap_metrics[*possible_path_idx].divergence = Some(f_rounded);
             debug!("\t\thap_id:{}\tfrequencies_mean:{}\tfirst_sol:{}\tdivergence:{}", gurobi_opt_var.hap_metrics[*possible_path_idx].hap_id.as_ref().unwrap(), gurobi_opt_var.hap_metrics[*possible_path_idx].frequencies_mean.as_ref().unwrap(), gurobi_opt_var.hap_metrics[*possible_path_idx].first_sol.as_ref().unwrap(), f_rounded);
             
-            let epsilon = 1e-2;
+            // let epsilon = 0.0;
             // // debug 
-            // if gurobi_opt_var.otu == "142" {
+            // if gurobi_opt_var.otu == "142" || gurobi_opt_var.otu == "195" {
             //     println!("{}\tf_rounded {} {} {} {}", gurobi_opt_var.otu, f_rounded, f > args.unique_trio_nodes_mean_count_f, f - args.unique_trio_nodes_mean_count_f, (f - args.unique_trio_nodes_mean_count_f).abs() < epsilon);
             // }
             
-            if (f - args.unique_trio_nodes_mean_count_f) > epsilon {
-                if f <= 0.6 {
+            if f_rounded > args.unique_trio_nodes_mean_count_f {
+                if f_rounded <= 0.6 {
                     let this_strain_single_cov_ratio = gurobi_opt_var.hap_metrics[*possible_path_idx].unique_trio_nodes_fraction.unwrap() * gurobi_opt_var.hap_metrics[*possible_path_idx].path_cov_ratio.unwrap();
                     if this_strain_single_cov_ratio < args.single_cov_ratio || sol == 0.0 {
                         continue;
@@ -1150,7 +1161,7 @@ fn second_filter_paths(
                 } else {
                     continue;
                 }
-            } else if (f - args.unique_trio_nodes_mean_count_f) <= epsilon && sol != 0.0 {
+            } else if f_rounded <= args.unique_trio_nodes_mean_count_f && sol != 0.0 {
                 filter_possible_paths_idx.push(*possible_path_idx);
             }
 
@@ -1735,7 +1746,7 @@ pub fn profile(args: ProfileArgs) -> Result<(), Box<dyn std::error::Error>> {
     check_args_valid(&args, &mut input_file);
 
     if args.species && !file_exists(&input_file.species_abund_file) {
-        log::info!("{} - Read classification...", Local::now().format("%Y-%m-%d %H:%M:%S"));
+        log::info!("- Read classification...");
         let rcls_df = rcls::rcls_profile(&input_file, args.threads)?;
         // let column_names = rcls_df.get_column_names();
         // println!("Column names: {:?}", column_names);
@@ -1760,15 +1771,15 @@ pub fn profile(args: ProfileArgs) -> Result<(), Box<dyn std::error::Error>> {
             .filter(col("species").neq(lit("U")))
             .collect()?;
     
-        log::info!("{} - Species level profiling...", Local::now().format("%Y-%m-%d %H:%M:%S"));
+        log::info!("- Species level profiling...");
         let species_profile_df = species_profiling(&args, &input_file, &filter_unmapped_rcls_df)?;
 
         if args.strain && !file_exists(&input_file.strain_abund_file) {
-            log::info!("{} - Strain level profiling...", Local::now().format("%Y-%m-%d %H:%M:%S"));
+            log::info!("- Strain level profiling...");
             strain_profiling(&args, &input_file, &species_profile_df, &filter_unmapped_rcls_df)?;
         }
     } else if args.strain && !file_exists(&input_file.strain_abund_file) {
-        log::info!("{} - Strain level profiling...", Local::now().format("%Y-%m-%d %H:%M:%S"));
+        log::info!("- Strain level profiling...");
         let schema = Schema::from_iter(vec![
             Field::new("read_id2".into(), DataType::String),
             Field::new("mapq2".into(), DataType::Int32),
@@ -1832,10 +1843,10 @@ pub fn profile(args: ProfileArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let minutes_clock = start.elapsed().as_secs_f64() / 60.0;
-    log::info!("{} - Profiling execution clock time: {:.2} min", Local::now().format("%Y-%m-%d %H:%M:%S"), minutes_clock);
+    log::info!("- Profiling execution clock time: {:.2} min", minutes_clock);
 
     let minuted_cpu = start_cpu.elapsed().as_secs_f64() / 60.0;
-    log::info!("{} - Profiling execution cpu time: {:.2} min", Local::now().format("%Y-%m-%d %H:%M:%S"), minuted_cpu);
+    log::info!("- Profiling execution cpu time: {:.2} min", minuted_cpu);
 
     Ok(())
 }

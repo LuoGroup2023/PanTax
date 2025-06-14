@@ -7,26 +7,23 @@ use crossbeam_channel::unbounded;
 use needletail::parse_fastx_file;
 use regex::Regex;
 use crate::cmdline::*;
+use crate::clog::init_logger;
 use log::*;
 use rust_htslib::bgzf::{Writer as BGZFWriter, CompressionLevel};
 use rust_htslib::tpool::ThreadPool;
 use rust_htslib::faidx::build;
 
-
 fn check_args_valid(args: &FastixeArgs) {
-    let level: LevelFilter;
-    if args.trace {
-        level = log::LevelFilter::Trace;
-    } else if args.debug {
-        level = log::LevelFilter::Debug;
-    } else {
-        level = log::LevelFilter::Info
-    }
 
-    simple_logger::SimpleLogger::new()
-        .with_level(level)
-        .init()
-        .unwrap();
+    let level = if args.trace {
+        "trace"
+    } else if args.debug {
+        "debug"
+    } else {
+        "info"
+    };
+
+    init_logger(level);
 
     rayon::ThreadPoolBuilder::new().num_threads(args.threads).build_global().unwrap();
 

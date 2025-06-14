@@ -7,7 +7,7 @@ use needletail::parse_fastx_file;
 use polars::prelude::*;
 use crate::rcls::save_output_to_file;
 use log::*;
-use chrono::Local;
+use crate::clog::init_logger;
 
 struct Stats {
     total_number: usize,
@@ -130,17 +130,14 @@ fn genome_metadata_stat(genome_metadata_file: PathBuf, species_len_output: &Path
 
 pub fn stat(args: StatArgs) -> Result<(), Box<dyn std::error::Error>> {
 
-    simple_logger::SimpleLogger::new()
-        .with_level(log::LevelFilter::Info)
-        .init()
-        .unwrap();
+    init_logger("info");
     
     if let Some(genome) = args.input_file {
         let stats = stat_single_fasta(genome);
         print_stats_table(&stats);
     } else if let Some(genome_metadata_file) = args.genome_metadata_file {
         genome_metadata_stat(genome_metadata_file, &args.output_name)?;
-        info!("{} - Genomes statistics results written to {}.", Local::now().format("%Y-%m-%d %H:%M:%S"), args.output_name.to_string_lossy());
+        info!("- Genomes statistics results written to {}.", args.output_name.to_string_lossy());
     } else if let Some(genome_filelist) = args.input_list {
         let paths: Vec<String> = fs::read_to_string(genome_filelist).unwrap().lines().map(|s| s.to_string()).collect();
         let results = Mutex::new(vec![]);
@@ -166,7 +163,7 @@ pub fn stat(args: StatArgs) -> Result<(), Box<dyn std::error::Error>> {
         for line in results.into_inner().unwrap() {
             file.write_all(line.as_bytes()).unwrap();
         }
-        info!("{} - Genomes statistics results written to {}.", Local::now().format("%Y-%m-%d %H:%M:%S"), args.output_name.to_string_lossy());
+        info!("- Genomes statistics results written to {}.", args.output_name.to_string_lossy());
 
     }
         
