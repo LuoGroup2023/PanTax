@@ -13,13 +13,21 @@
 
 + [Overview](#overview)
 + [Installation](#installation)
++ [Installation (v2.0.0)](#installation-version-200)
 + [Genome preprocessing](#genome-preprocessing)
 + [Running](#running)
 + [Options](#options)
-+ [PanTax output](#panTax-output)
++ [PanTax output](#pantax-output)
 + [Examples](#examples)
 + [Possible issues during installation](#possible-issues-during-installation)
++ [Change](#change)
++ [TODO](#todo)
 + [Citation](#citation)
+
+> [!IMPORTANT]
+> **Pantax v2.0.0 dev is released in the rust_dev branch.**
+> 
+> The species and strain profiling module, the conversion of a single strain into a GFA module, the graph node and path information serialization and compression module, and the long read GAF filtering module are all rewritten using Rust. They are all integrated into the subcommand of pantaxr. It runs more than 25x faster in profiling.
 
 ## Overview
 
@@ -101,6 +109,47 @@ chmod +x pantax pantax_utils data_preprocessing
 ./pantax -h
 ```
 
+## Installation (Version 2.0.0)
+* **From bioconda**
+Bioconda installation is not supported for now.
+
+* **From source**
+```
+git clone https://github.com/LuoGroup2023/PanTax.git -b rust_dev
+conda create -n pantax
+conda activate pantax
+conda install -c bioconda -c conda-forge -c gurobi -c defaults \
+    python=3.10 \
+    r-base=4.2 \
+    pggb=0.6.0 \
+    vg \
+    graphaligner=1.0.17 \
+    sylph=0.6.1 \
+    fastani=1.33 \
+    pandas \
+    tqdm \
+    numpy \
+    networkx \
+    pyarrow \
+    gurobi=11 \
+    clang \
+    rust=1.82
+cd PanTax
+bash install.sh v2
+
+# If vg is not available, install with conda.(optional)
+conda create -n vg python=3.10
+conda activate vg
+conda install vg=1.59 -c bioconda
+cd tools
+ln -fs $(which vg) ./
+
+# Run pantax
+cd ../scripts
+./pantax -h
+```
+
+You may also choose not to specify the version of the tool, but the impact of using the latest version has not yet been tested.
 
 ## Genome preprocessing
 
@@ -179,6 +228,8 @@ Strain-level metagenomic profiling using pangenome graphs with PanTax
         --create                          Create the database only.
         --fast                            Create the database using genomes filtered by sylph query instead of all genomes.
         -g, --save                        Save species graph information.
+            --lz                          Serialized zip graph file saved with lz4 format (for save option).
+            --zstd                        Serialized zip graph file saved with zstd format (for save option).
         --force                           Force to rebuild pangenome.
         -e file                           Path to pangenome building tool executable file. (default: pggb)
         -A, --ani float                   ANI threshold for sylph query result filter. (default: 99)
@@ -279,7 +330,7 @@ pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --species-level
 pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --strain-level -n
 ```
 
-## Possible issues during installation (optional)
+## Possible issues during installation
 * `gsl` incompatibility
 
 During the "Building reference pangenome" step, there were no errors reported by `pantax` and an interrupt occurred without obtaining any results. You should run the command `wfmash -h` to check whether `wfmash` can work. If you encounter a error `symbol lookup error: ../lib/libgsl.so.25: undefined symbol: cblas_ctrmv` after running it, this indicates a GSL incompatibility issue. The `gsl` should be installed from the `conda-forge` channel `https://anaconda.org/conda-forge/gsl/files` instead of the `anaconda` channel `https://anaconda.org/anaconda/gsl/files`. This issue is caused by the channel settings of conda, so you should specify the channel with the `-c` flag during installation.
@@ -287,15 +338,77 @@ During the "Building reference pangenome" step, there were no errors reported by
 conda install pantax -c bioconda -c conda-forge -c gurobi
 ```
 
+## Change
+
+### Version: V2.0.0 dev (update at 2024-06-14)
+
+<details>
+<summary>Click here to check the log of all updates</summary>
+
+#### *__[Update - 2024 - 04 - 08]__* :  <BR/>
+
+*V0.0.1: Initial commit! <BR/>*
+
+#### *__[Update - 2024 - 09 - 09]__* :  <BR/>
+
+*V1.0.1 <BR/>*
+* *Fix a bug caused by the presence of the same path or a total of less than 3 nodes per path in GFA <BR/>*
+* *database creation, species level and strain level work step by step now <BR/>*
+* *Optimization of strain level calculation <BR/>*
+* *Sampling nodes(500) are used for small model testing (set for codeocean) <BR/>*
+* *Improve the logger for strain level calculation <BR/>*
+
+#### *__[Update - 2024 - 10 - 09]__* :  <BR/>
+
+*V1.0.2 <BR/>*
+* *Fix a bug in numpy matrix caused by the graph has the same path or the total number of nodes per path less than 3 <BR/>*
+* *Kill the long-term vg alignment and then continue the analysis <BR/>*
+
+#### *__[Update - 2024 - 10 - 12]__* :  <BR/>
+
+* *PanTax can be downloaded from bioconda now <BR/>*
+
+#### *__[Update - 2024 - 11 - 09]__* :  <BR/>
+
+*V1.1.0 <BR/>*
+* *Estimate abundance with GAF file, no longer json file.<BR/>*
+* *Fix the bug when using GAF file to estimate abundance. In the GAF file, the read_end columns may be * instead of a number.<BR/>*
+
+#### *__[Update - 2025 - 04 - 03]__* :  <BR/>
+
+*V1.2.0 <BR/>*
+* *PanTax can accept interleaved and un-interleaved paired-end reads now.<BR/>*
+* *Implementing pangenome construction task scheduling to accelerate construction.<BR/>*
+* *Adding hierarchical clustering methods for single species redundancy reduction and code simplification.<BR/>*
+* *Add the --fast option to execute the fast version of PanTax. This version utilizes the ultrafast species-level metagenomic profiler sylph for rapid       species/strain filtering, significantly reducing the number of species-level pan-genome constructions for metagenomic data.<BR/>*
+* *PanTax adds a strain rescue step.<BR/>*
+* *For single-species strain-level tasks, the -fr option is set as a dynamic metric, becoming stricter as the average coverage depth of the strain increases.<BR/>*
+* *The strain profiling result file is now more detailed. For specifics, please refer to the description in the new README file.<BR/>*
+* *PanTax is now compatible with strain profiling using the GTDB database.<BR/>*
+* *data_preprocessing is applicable for deduplication filtering using the GTDB database with --db gtdb.<BR/>*
+* *data_preprocessing now can use hierarchical clustering methods for single species redundancy reduction，and optimize the data_preprocessing code.<BR/>*
+* *The genome information file's id column can now include genomes in gzip-compressed (.gz) file formats.<BR/>*
+
+</details>
+
+#### *__[Update - 2025 - 06 - 14]__* :  <BR/>
+*V2.0.0 dev <BR/>*
+* *Fix bug: filter a few reads. The mapping of very few reads in GAF shows end > start, and only one node of these reads maps to the graph. <BR/>*
+* *The species and strain profiling module, the conversion of a single strain into a GFA module, the graph node and path information serialization and compression module, and the long read GAF filtering module are all rewritten using Rust. They are all integrated into the subcommand of pantaxr. It runs more than 25x faster in profiling. In general, the results will change slightly, with higher precision and lower recall. <BR/>*
+
+
+
+## TODO
++ Performance comparison between `vg giraffe` long read alignment and `Graphaligner` alignment.
+
 ## Citation
 ```
-@article {Zhang2024.11.15.623887,
-	author = {Zhang, Wenhai and Liu, Yuansheng and Xu, Jialu and Chen, Enlian and Schonhuth, Alexander and Luo, Xiao},
-	title = {PanTax: Strain-level taxonomic classification of metagenomic data using pangenome graphs},
-	elocation-id = {2024.11.15.623887},
-	year = {2024},
-	doi = {10.1101/2024.11.15.623887},
-	publisher = {Cold Spring Harbor Laboratory},
-	journal = {bioRxiv}
+@article{luo2025strain,
+  title={Strain-level metagenomic profiling using pangenome graphs with PanTax},
+  author={Luo, Xiao and Zhang, Wenhai and Liu, Yuansheng and Li, Guangyi and Xu, Jialu and Chen, Enlian and Schonhuth, Alexander},
+  journal={bioRxiv},
+  pages={2025--04},
+  year={2025},
+  publisher={Cold Spring Harbor Laboratory}
 }
 ```

@@ -1,4 +1,4 @@
-import logging, shutil, h5py, re, sys
+import logging, shutil, re, sys
 # from logging import handlers
 # from multiprocessing import Queue
 from time import time
