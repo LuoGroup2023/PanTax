@@ -8,6 +8,7 @@ basedir="$(pwd)"
 chmod +x "$basedir/scripts/pantax" "$basedir/scripts/pantax_utils" "$basedir/scripts/data_preprocessing"
 
 if [ -z "$arg1" ]; then
+    # conda env create -f environment.yaml -y
     cd $basedir/tools/fastix
     cargo install fastix --root ./
 else

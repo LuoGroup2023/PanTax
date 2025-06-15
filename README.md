@@ -24,10 +24,12 @@
 + [TODO](#todo)
 + [Citation](#citation)
 
+---
+
 > [!IMPORTANT]
 > **Pantax v2.0.0 dev is released in the rust_dev branch.**
 > 
-> The species and strain profiling module, the conversion of a single strain into a GFA module, the graph node and path information serialization and compression module, and the long read GAF filtering module are all rewritten using Rust. They are all integrated into the subcommand of pantaxr. It runs more than 25x faster in profiling.
+> The species and strain profiling module, the conversion of a single strain into a GFA module, the graph node and path information serialization and compression module, and the long read GAF filtering module are all rewritten using Rust. They are all integrated into the subcommand of `pantaxr`. It runs more than 25x faster in profiling.
 
 ## Overview
 
@@ -148,7 +150,7 @@ ln -fs $(which vg) ./
 cd ../scripts
 ./pantax -h
 ```
-
+If the installation environment encounters problems, you can also use `conda env create -f rust_dev.yaml -y` to build it.
 You may also choose not to specify the version of the tool, but the impact of using the latest version has not yet been tested.
 
 ## Genome preprocessing
