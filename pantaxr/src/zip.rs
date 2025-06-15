@@ -259,7 +259,9 @@ fn read_and_zip_gfa(gfa_file: &Path, previous: usize, output_dir: &Path, compres
                     File::create(&zip_file)
                         .expect(&format!("{:?} path not valid; exiting ", zip_file)),
                 );        
-                bincode::encode_into_std_write(&graph, &mut serialized_gfa_file, bincode::config::standard()).unwrap();
+                // bincode::encode_into_std_write(&graph, &mut serialized_gfa_file, bincode::config::standard()).unwrap();
+                bincode::serialize_into(&mut serialized_gfa_file, &graph).unwrap();
+
             } else {
                 debug!("- {:?} exists. Skipping.", zip_file)
             }
@@ -277,7 +279,8 @@ fn read_and_zip_gfa(gfa_file: &Path, previous: usize, output_dir: &Path, compres
             if !zip_file.exists() {
                 let file = File::create(zip_file)?;
                 let mut compressed_writer = FrameEncoder::new(BufWriter::new(file));
-                bincode::encode_into_std_write(&graph, &mut compressed_writer, bincode::config::standard())?;
+                // bincode::encode_into_std_write(&graph, &mut compressed_writer, bincode::config::standard())?;
+                bincode::serialize_into(&mut compressed_writer, &graph).unwrap();
                 compressed_writer.finish()?;
             } else {
                 debug!("- {:?} exists. Skipping.", zip_file)
@@ -291,7 +294,8 @@ fn read_and_zip_gfa(gfa_file: &Path, previous: usize, output_dir: &Path, compres
                 let file = File::create(zip_file)?;
                 let mut compressed_writer = Encoder::new(file, compress_lvl)?;
                 compressed_writer.multithread(threads as u32)?;
-                bincode::encode_into_std_write(&graph, &mut compressed_writer, bincode::config::standard())?;
+                // bincode::encode_into_std_write(&graph, &mut compressed_writer, bincode::config::standard())?;
+                bincode::serialize_into(&mut compressed_writer, &graph).unwrap();
                 compressed_writer.finish()?;
             } else {
                 debug!("- {:?} exists. Skipping.", zip_file)
@@ -312,21 +316,24 @@ pub fn load_from_zip_graph(
         CompressType::Serialized => {
             let file = File::open(file_path)?;
             let mut reader = BufReader::new(file);
-            let graph: Graph = bincode::decode_from_std_read(&mut reader, bincode::config::standard())?;
+            // let graph: Graph = bincode::decode_from_std_read(&mut reader, bincode::config::standard())?;
+            let graph: Graph = bincode::deserialize_from(&mut reader)?;
             Ok(graph)
         }
         CompressType::Lz4 => {
             let file = File::open(file_path)?;
             let decoder = FrameDecoder::new(BufReader::new(file));
             let mut reader = BufReader::new(decoder);
-            let graph: Graph = bincode::decode_from_std_read(&mut reader, bincode::config::standard())?;
+            // let graph: Graph = bincode::decode_from_std_read(&mut reader, bincode::config::standard())?;
+            let graph: Graph = bincode::deserialize_from(&mut reader)?;
             Ok(graph)
         }
         CompressType::Zstd => {
             let file = File::open(file_path)?;
             let decoder = Decoder::new(BufReader::new(file))?;
             let mut reader = BufReader::new(decoder);
-            let graph: Graph = bincode::decode_from_std_read(&mut reader, bincode::config::standard())?;
+            // let graph: Graph = bincode::decode_from_std_read(&mut reader, bincode::config::standard())?;
+            let graph: Graph = bincode::deserialize_from(&mut reader)?;
             Ok(graph)
         }
     }

@@ -28,7 +28,8 @@ use nalgebra::{DMatrix, RowDVector};
 
 use rand::{SeedableRng, rngs::StdRng, seq::IndexedRandom};
 
-use bincode::{Encode, Decode};
+// use bincode::{Encode, Decode};
+use serde::{Serialize, Deserialize};
 // use std::io::{BufWriter, Write}; 
 
 #[derive(Debug, Default, Clone)]
@@ -443,7 +444,8 @@ fn group_reads_by_species(df: &DataFrame) -> BTreeMap<String, Vec<Record>> {
 
 
 
-#[derive(Debug, Encode, Decode)]
+// #[derive(Debug, Encode, Decode)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Graph {
     pub nodes_len: Vec<i64>,
     pub paths: BTreeMap<String, Vec<usize>>,
