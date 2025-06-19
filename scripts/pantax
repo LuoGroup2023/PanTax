@@ -411,7 +411,7 @@ if [ $reconstruction_flag == "True" ]; then
     python $script_dir/prepare_building.py $genomes_info $wd $tmp_dir
     gfa_build_dir=$tmp_dir/gfa_build
     # first step: build pangenome for the species with more than two genomes
-    python $script_dir/task_scheduling.py $gfa_build_dir $tmp_dir/species_pangenome $fastix $vg -t $threads -v $verbose -f $force -e $pangenome_building_tool -d $debug -p $parallel_build -g $save
+    python $script_dir/task_scheduling.py $gfa_build_dir $tmp_dir/species_pangenome $genomes_info $fastix $vg -t $threads -v $verbose -f $force -e $pangenome_building_tool -d $debug -p $parallel_build -g $save
 
     # second step: build variation graph for the species with one genomes
     python $script_dir/build_graph.py species_eq1_genomes.txt $gfa_build_dir
