@@ -226,7 +226,8 @@ class StrainAbundanceEst():
 
     def abundance_cal(self) -> None:
         genomes_info = pd.read_csv(self.genomes_info, sep="\t",usecols=[0,1],dtype={"genome_ID": str, "strain_taxid": str})
-        genomes_info["hap_id"] = genomes_info["genome_ID"].str.split("_").str[:2].str.join("_")
+        # genomes_info["hap_id"] = genomes_info["genome_ID"].str.split("_").str[:2].str.join("_")
+        genomes_info["hap_id"] = genomes_info["genome_ID"]
         otu_cov_df = pd.DataFrame(self.otu_cov, columns=["species_taxid", "hap_id", "unique_trio_fraction", "uniq_trio_cov_mean", "path_base_cov", "first_sol", "strain_cov_diff", "predicted_coverage", "is_exists", "total_cov_diff"])
         otu_cov_df = otu_cov_df.drop(columns=["is_exists"])
         otu_cov_df = pd.merge(otu_cov_df, genomes_info, on="hap_id", how="left")

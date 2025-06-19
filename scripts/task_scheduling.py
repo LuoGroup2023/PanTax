@@ -66,6 +66,9 @@ class TaskScheduling:
         else:
             raise ValueError(f"The option {self.force} is not valid.")
 
+        self.genomes_mapping = None
+        self.get_genomes_metadata()
+
         # check pangenome need to be built
         pan_species = Path(self.pan_species)
         self.pan_species_files = list(pan_species.glob("*.txt"))
@@ -124,6 +127,15 @@ class TaskScheduling:
         reference_genomes_df = pd.read_csv(self.reference, sep="\t", header=None, dtype=object)
         self.species2reference = dict(zip(reference_genomes_df.iloc[:, 0], reference_genomes_df.iloc[:, 1]))
 
+    def get_genomes_metadata(self):
+        genomes_mapping = {}
+        with open(self.metadata, "r") as f:
+            next(f)
+            for line in f:
+                tokens = line.strip().split("\t")
+                genomes_mapping[Path(tokens[4]).stem] = tokens[0]
+        self.genomes_mapping = genomes_mapping
+
     def get_all_cmd(self):
         # build pangenome
         self.all_cmd = []
@@ -146,8 +158,9 @@ class TaskScheduling:
                 cmd_tmp_list = []
                 new_genomes_path = []
                 for genome in genomes:
-                    genome_name = Path(genome).name
-                    genome_name = "_".join(genome_name.split("_")[:2])
+                    # genome_name = Path(genome).name
+                    # genome_name = "_".join(genome_name.split("_")[:2])
+                    genome_name = self.genomes_mapping[Path(genome).stem]
                     if genome.endswith("gz"):
                         gunzip_genome_name = Path(genome).name.replace(".gz", "")
                         cmd_tmp_list.append(f"gunzip -c {genome} > {self.wd}/{species}/{gunzip_genome_name}; {self.fastix} {self.wd}/{species}/{gunzip_genome_name} -p '{genome_name}#1#' > {self.wd}/{species}/{genome_name}.fa")
@@ -402,6 +415,7 @@ def main():
     parser = argparse.ArgumentParser(prog="multi_tasks_parallel.py", description=usage)
     parser.add_argument("wd", type=str, help="Pangenome building directory.")
     parser.add_argument("pan_species", type=str, help="Pangenome species information directory.")
+    parser.add_argument("metadata", type=str, help="Genomes information file.")
     parser.add_argument("fastix", type=str, help="Fastix executable file.")
     parser.add_argument("vg", type=str, help="Vg executable file.")
     parser.add_argument("-e", "--pangenome_building_exe", type=str, default="pggb", help="Pangenome building executable file(PGGB, Minigraph-Cactus).")
