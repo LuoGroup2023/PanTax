@@ -487,15 +487,15 @@ fn read_gfa(gfa_file: &Path, previous: usize) -> Result<Graph, Box<dyn std::erro
                 continue;
             }
 
-            let reverse_flag ;
+            // let reverse_flag ;
             let haplotype_id: String;
-            let mut path: Vec<usize>;
+            let path: Vec<usize>;
 
             if parts[0] == "W" {
                 // W line
                 haplotype_id = parts[1].to_string();
                 let last_field = parts.last().unwrap_or(&"");
-                reverse_flag = last_field.starts_with('<');
+                // reverse_flag = last_field.starts_with('<');
 
                 path = re_w.find_iter(last_field)
                     .map(|mat| {
@@ -507,7 +507,7 @@ fn read_gfa(gfa_file: &Path, previous: usize) -> Result<Graph, Box<dyn std::erro
                 // P line
                 haplotype_id = parts[1].split('#').next().unwrap_or("").to_string();
                 let path_field = parts.get(2).unwrap_or(&"");
-                reverse_flag = path_field.split(',').next().unwrap_or("").ends_with('-');
+                // reverse_flag = path_field.split(',').next().unwrap_or("").ends_with('-');
 
                 path = re_p.find_iter(path_field)
                     .map(|mat| {
@@ -517,9 +517,9 @@ fn read_gfa(gfa_file: &Path, previous: usize) -> Result<Graph, Box<dyn std::erro
                     .collect();
             }
 
-            if reverse_flag {
-                path.reverse();
-            }
+            // if reverse_flag {
+            //     path.reverse();
+            // }
 
             // merge same haplotype_id
             // # Multiple chromosomes from the same genome merge into one path. 
@@ -647,11 +647,23 @@ fn trio_nodes_info(graph: &Graph) -> (HashMap<(usize, usize, usize), usize>, Vec
     let mut trio_nodes_set = HashSet::new();
     let mut hap_trio_paths = HashMap::new();
     let haps: Vec<String> = graph.paths.keys().cloned().collect();
+    
+    // println!("haps: {:?}", haps);
 
     // construct hap → trio_path
     for (hap, path) in &graph.paths {
+        // if path.windows(3).any(|w| w == [27, 29, 30]) {
+        //     println!("Found (27,29,30) in path {:?}", hap);
+        // }
         let trio_path: Vec<(usize, usize, usize)> = path.windows(3)
-            .map(|w| (w[0], w[1], w[2]))
+            // .map(|w| (w[0], w[1], w[2]))
+            .map(|w| {
+                if w[0] > w[2] {
+                    (w[2], w[1], w[0])
+                } else {
+                    (w[0], w[1], w[2])
+                }
+            })
             .collect();
         trio_nodes_set.extend(trio_path.iter().cloned());
         hap_trio_paths.insert(hap.clone(), trio_path);
@@ -668,6 +680,10 @@ fn trio_nodes_info(graph: &Graph) -> (HashMap<(usize, usize, usize), usize>, Vec
                 if let Some(&idx) = trio_index_map.get(t) {
                     presence_matrix[(idx, hap_idx)] = 1;
                     count_per_trio[idx] += 1;
+                    // // for debug
+                    // if *t == (293380, 293382, 293383) {
+                    //     println!("count_per_trio: {}", count_per_trio[idx])
+                    // }
                 }
             }
         }
@@ -694,11 +710,18 @@ fn trio_nodes_info(graph: &Graph) -> (HashMap<(usize, usize, usize), usize>, Vec
     };
 
     // // for debug
+    // use std::io::Write;
     // let file = File::create("unique_trio_nodes.txt").unwrap();
-    // let mut writer = BufWriter::new(file);
-    // writeln!(writer, "i,j,k,value").unwrap();
-    // for (&(i, j, k), &v) in unique_trio_nodes.iter() {
-    //     writeln!(writer, "{},{},{},{}", i, j, k, v).unwrap();
+    // let mut writer = std::io::BufWriter::new(file);
+    // // writeln!(writer, "i,j,k,value").unwrap();
+    // // for (&(i, j, k), &v) in unique_trio_nodes.iter() {
+    // //     writeln!(writer, "{},{},{},{}", i, j, k, v).unwrap();
+    // // }
+    // let mut sorted_entries: Vec<_> = unique_trio_nodes.iter().collect();
+    // sorted_entries.sort_by_key(|(&(i, j, k), _)| (i, j, k));
+    
+    // for (&(i, j, k), &v) in sorted_entries {
+    //     writeln!(writer, "{},{},{}\t{}", i, j, k, v).unwrap();
     // }
 
     (unique_trio_nodes, unique_lengths, final_matrix)
@@ -762,7 +785,7 @@ fn get_node_abundances(
 
         let start_node = read_nodes[0];
         let end_node = *read_nodes.last().unwrap();
-        let target_len = read.read_end - read.read_start;
+        let mut target_len = read.read_end - read.read_start;
         let mut seen = 0;
         let mut read_nodes_len: HashMap<usize, i64> = HashMap::new();
         let mut undup_read_nodes = HashSet::new();
@@ -820,10 +843,17 @@ fn get_node_abundances(
                     // dbg!(otu, &read.read_id, i, node, node_len, read.read_start);
                     (node_len - read.read_start, read.read_start)
                 } else if i == read_nodes.len() - 1 {
+                    if target_len < seen { target_len = seen }
                     (target_len - seen, 0)
                 } else {
                     (node_len, 0)
                 };
+                
+                // // for debug
+                // if node == 146059usize {
+                //     let origin_node = node + 1 + start;
+                //     println!("read id: {}, node: {}, origin_node: {}, node aln len: {}, start idx: {}", read.read_id, node, origin_node, node_aln_len, start_idx)
+                // }
 
                 if let Some(mut entry) = node_base_cov_info.get_mut(&node) {
                     for j in start_idx as usize..((start_idx + node_aln_len) as usize).min(entry.2.len()) {
@@ -840,14 +870,6 @@ fn get_node_abundances(
                 }
             }
         }
-
-        // // for debug
-        // use std::io::Write;
-        // let file = File::create(format!("{otu}_base_aln.txt")).unwrap();
-        // let mut writer = std::io::BufWriter::new(file);
-        // for entry in bases_per_node.iter() {
-        //     writeln!(writer, "{}\t{}", entry.key(), entry.value()).unwrap();
-        // }
 
         if read_nodes.len() < 3 {
             return;
@@ -885,12 +907,61 @@ fn get_node_abundances(
     });
 
     // // for debug
-    // if otu.clone() == "Myxococcus_xanthus".to_string() {
-    //     let file = File::create("trio_nodes_bases_count.txt").unwrap();
-    //     let mut writer = BufWriter::new(file);
+    // if otu.clone() == "Myxococcus_xanthus".to_string() || otu == "173" {
+    //     use std::io::Write;
+    //     let file = File::create(format!("{otu}_trio_nodes_bases_count.txt")).unwrap();
+    //     let mut writer = std::io::BufWriter::new(file);
     //     for entry in trio_nodes_bases_count.iter() {
-    //         writeln!(writer, "{},{}", entry.key(), entry.value()).unwrap();
+    //         if *entry.value() > 0 { writeln!(writer, "{}\t{}", entry.key(), entry.value()).unwrap() }
     //     }
+    // }
+
+    // // for debug
+    // if otu == "173" || otu == "9" {
+    //     use std::io::Write;
+    //     let file = File::create(format!("{otu}_trio_nodes_bases_count.txt")).unwrap();
+    //     let mut writer = std::io::BufWriter::new(file);
+    //     let mut data: Vec<(usize, i64)> = trio_nodes_bases_count
+    //         .par_iter()
+    //         .filter_map(|e| {
+    //             let k = *e.key();
+    //             let v = *e.value();
+    //             (v > 0).then_some((k, v))
+    //         })
+    //         .collect();
+    
+    //     data.par_sort_unstable_by_key(|(k, _)| *k);
+    
+    //     let mut buffer = String::with_capacity(data.len() * 12);
+    //     for (i, val) in data {
+    //         buffer.push_str(&format!("{i}\t{val}\n"));
+    //     }
+    
+    //     writer.write_all(buffer.as_bytes()).unwrap();
+    // }
+
+    // // for debug
+    // if otu == "173" || otu == "9" {
+    //     use std::io::Write;
+    //     let file = File::create(format!("{otu}_base_aln.txt")).unwrap();
+    //     let mut writer = std::io::BufWriter::new(file);
+    //     let mut data: Vec<(usize, i64)> = bases_per_node
+    //         .par_iter()
+    //         .filter_map(|e| {
+    //             let k = *e.key();
+    //             let v = *e.value();
+    //             (v > 0).then_some((k, v))
+    //         })
+    //         .collect();
+    
+    //     data.par_sort_unstable_by_key(|(k, _)| *k);
+    
+    //     let mut buffer = String::with_capacity(data.len() * 12);
+    //     for (i, val) in data {
+    //         buffer.push_str(&format!("{i}\t{val}\n"));
+    //     }
+    
+    //     writer.write_all(buffer.as_bytes()).unwrap();
     // }
 
     // rayon calculate abundance
@@ -905,6 +976,20 @@ fn get_node_abundances(
             base_cov as f64 / len as f64
         })
         .collect();
+
+    // // for debug
+    // if otu == "173" || otu == "9" {
+    //     use std::io::Write;
+    //     let file = File::create(format!("{otu}_node_depth.txt")).unwrap();
+    //     let mut writer = std::io::BufWriter::new(file);
+    
+    //     let mut buffer = String::with_capacity(node_abundance_vec.len());
+    //     for (i, val) in node_abundance_vec.iter().enumerate() {
+    //         if *val > 0.0 { buffer.push_str(&format!("{i}\t{val}\n")) }
+    //     }
+    
+    //     writer.write_all(buffer.as_bytes()).unwrap();
+    // }
 
     let trio_node_abundance_vec: Vec<f64> = trio_nodes_len
         .par_iter()
@@ -1296,7 +1381,7 @@ fn gurobi_opt(
         }
     } else if !args.sample_test && args.sample_nodes > 0 {
         if valid_nodes.len() > args.sample_nodes {
-            debug!("The {} species graph has too many nodes. Subsample {}.", gurobi_opt_var.otu, args.sample_test);
+            debug!("The {} species graph has too many nodes. Subsample {}.", gurobi_opt_var.otu, args.sample_nodes);
             sample_sorted(&valid_nodes, args.sample_nodes, 42)
         } else {
             valid_nodes
