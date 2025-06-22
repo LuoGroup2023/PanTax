@@ -2,6 +2,7 @@
 set -e
 
 arg1="${1:-}"
+arg2="${2:-}"
 
 basedir="$(pwd)"
 
@@ -13,8 +14,12 @@ if [ -z "$arg1" ]; then
     cargo install fastix --root ./
 else
     cd "$basedir/pantaxr"
-    rm -f Cargo.lock
-    cargo clean
-    RUSTFLAGS="-C link-args=-Wl,-rpath,${CONDA_PREFIX}/lib" cargo build -r
+    # rm -f Cargo.lock
+    # cargo clean
+    if [ ! -z "$arg2" ] && [ $arg2 == "h5" ]; then
+        RUSTFLAGS="-C link-args=-Wl,-rpath,${CONDA_PREFIX}/lib" cargo build -r --features h5
+    else
+        RUSTFLAGS="-C link-args=-Wl,-rpath,${CONDA_PREFIX}/lib" cargo build -r
+    fi
     cp target/release/pantaxr "$basedir/scripts/pantaxr"
 fi

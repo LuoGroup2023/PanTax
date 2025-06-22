@@ -28,6 +28,7 @@ function print_help() {
   echo "        -g, --save                        Save species graph information."
   echo "            --lz                          Serialized zip graph file saved with lz4 format (for save option)."
   echo "            --zstd                        Serialized zip graph file saved with zstd format (for save option)."
+#   echo "            --h5                          Serialized zip graph file saved with hdf5 format (only used for experimental graph parsing)."
   echo "        --force                           Force to rebuild pangenome."
   echo "        -e file                           Path to pangenome building tool executable file. (default: pggb)" 
   echo "        -A, --ani float                   ANI threshold for sylph query result filter. (default: 99)"                                  
@@ -94,6 +95,7 @@ create_db="False"
 save="False"
 lz=false
 zstd=false
+h5=false
 force="False"
 pangenome_building_tool="pggb"
 parallel_build="True"
@@ -163,12 +165,13 @@ while [[ "$1" != "" ]]; do
         "--create") create_db="True"; shift 1;;
         "-g" | "--save") save="True"; shift 1;; 
         "--lz") lz=true; shift 1;;
-        "--zstd") zstd=true; shift 1;;     
+        "--zstd") zstd=true; shift 1;;
+        "--h5") h5=true; shift 1;;     
         "--force") force="True"; shift 1;;
         "-e") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pangenome_building_tool="$2"; shift 2; } ;;
         "--parallel") parallel_build=$2; shift 2;;
         "-A" | "--ani") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { ani_threshold="$2"; shift 2; } ;;
-        # "--mode") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { mode="$2"; shift 2; } ;;
+        "--mode") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { mode="$2"; shift 2; } ;;
         "--fast") mode="1"; shift 1;;
 
         "--index") create_index="True"; shift 1;;
@@ -635,12 +638,14 @@ else
     debug_flag=""
 fi
 
-if [ $save == "True" ] && [ $lz = false ] && [ $zstd = false ]; then
+if [ $save == "True" ] && [ $lz = false ] && [ $zstd = false ] && [ $h5 = false ]; then
     save_flag="--zip serialize"
-elif [ $save == "True" ] && [ $lz = true ] && [ $zstd = false ]; then
+elif [ $save == "True" ] && [ $lz = true ] && [ $zstd = false ] && [ $h5 = false ]; then
     save_flag="--zip lz"
-elif [ $save == "True" ] && [ $lz = false ] && [ $zstd = true ]; then
+elif [ $save == "True" ] && [ $lz = false ] && [ $zstd = true ] && [ $h5 = false ]; then
     save_flag="--zip zstd"
+elif [ $save == "True" ] && [ $lz = false ] && [ $zstd = false ] && [ $h5 = true ]; then
+    save_flag="--zip h5"
 else 
     save_flag=""
 fi

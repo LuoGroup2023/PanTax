@@ -1518,6 +1518,7 @@ fn optimize_otu(args: &ProfileArgs, otu: &String, start: u32, end: u32, reads_cl
         Some("serialize") => species_gfa_dir.join(format!("{}.bin", otu)),
         Some("lz")        => species_gfa_dir.join(format!("{}.bin.lz4", otu)),
         Some("zstd")      => species_gfa_dir.join(format!("{}.bin.zst", otu)),
+        Some("h5")        => species_gfa_dir.join(format!("{}.h5", otu)),
         _                 => species_gfa_dir.join(format!("{}.gfa", otu)),
     };
 
@@ -1530,6 +1531,9 @@ fn optimize_otu(args: &ProfileArgs, otu: &String, start: u32, end: u32, reads_cl
             .map_err(|e| format!("GFA read error: {}", e)).ok()?,
         Some("zstd")      => load_from_zip_graph(&gfa_file, CompressType::Zstd)
             .map_err(|e| format!("GFA read error: {}", e)).ok()?,
+        #[cfg(feature = "h5")]
+        Some("h5")      => load_from_zip_graph(&gfa_file, CompressType::Hdf5)
+            .map_err(|e| format!("GFA read error: {}", e)).ok()?,            
         _                 => read_gfa(&gfa_file, 0)
             .map_err(|e| format!("GFA read error: {}", e)).ok()?,
     };

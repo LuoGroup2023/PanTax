@@ -19,11 +19,16 @@ use fs2::FileExt;
 use std::time::Duration;
 use std::thread::sleep;
 
+#[cfg(feature = "h5")]
+use hdf5_metno::{File as H5File, Result};
+
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub enum CompressType {
     Lz4,
     Zstd,
     Serialized,
+    #[cfg(feature = "h5")]
+    Hdf5,
 }
 
 impl CompressType {
@@ -300,9 +305,12 @@ fn read_and_zip_gfa(gfa_file: &Path, previous: usize, output_dir: &Path, compres
             } else {
                 debug!("- {:?} exists. Skipping.", zip_file)
             }
-
         },
-
+        #[cfg(feature = "h5")]
+        CompressType::Hdf5 => {
+            eprintln!("Don't support hdf5 zip!");
+            exit(1)
+        }
     }  
 
     Ok((stem.into(), min_value + 1, max_value + 1, is_pan))
@@ -335,6 +343,23 @@ pub fn load_from_zip_graph(
             // let graph: Graph = bincode::decode_from_std_read(&mut reader, bincode::config::standard())?;
             let graph: Graph = bincode::deserialize_from(&mut reader)?;
             Ok(graph)
+        }
+        #[cfg(feature = "h5")]
+        CompressType::Hdf5 => {
+            let file = H5File::open(file_path)?;
+            let paths_group = file.group("paths")?;
+            let mut paths = BTreeMap::new();
+            for obj in paths_group.member_names()? {
+                let ds = paths_group.dataset(&obj)?;
+                let data: Vec<usize> = ds.read_1d::<usize>()?.to_vec();
+                paths.insert(obj, data);
+            }
+        
+            let node_len_group = file.group("node_len")?;
+            let node_len_ds = node_len_group.dataset("node_len")?;
+            let nodes_len: Vec<i64> = node_len_ds.read_1d::<i64>()?.to_vec();
+        
+            Ok(Graph { nodes_len, paths })            
         }
     }
 
