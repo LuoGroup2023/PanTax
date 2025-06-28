@@ -1141,7 +1141,7 @@ fn first_filter_paths(
                         _shift_unique_trio_nodes_fraction
                     }
                 } else {
-                    unique_trio_nodes_fraction * frequencies_mean
+                    args.unique_trio_nodes_fraction * frequencies_mean
                 };
                 debug!("\t\t{} unique trio node abundance > 0 ratio: {}, shift unique trio nodes fraction: {}, frequencies mean: {}", hap_id, unique_trio_nodes_fraction, shift_unique_trio_nodes_fraction, frequencies_mean);
                 
