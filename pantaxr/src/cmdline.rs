@@ -96,6 +96,9 @@ pub struct ProfileArgs {
     #[clap(short = 't', long = "threads", default_value_t = 1, help_heading = "GENERAL OPTIONS", help = "Number of threads.")]
     pub threads: usize, 
 
+    #[clap(long = "solver", default_value = "Gurobi", help_heading = "GENERAL OPTIONS", help = "Model solver selection (Gurobi, Cbc).")]
+    pub solver: String,
+
     #[clap(long = "gthreads", default_value_t = 1, help_heading = "STRAIN PROFILE PARAS OPTIONS", help = "Number of gurobi threads.")]
     pub gurobi_threads: i32,
 

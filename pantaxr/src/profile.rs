@@ -3,6 +3,7 @@ use crate::{cmdline::ProfileArgs, rcls};
 use rcls::{save_output_to_file, load_gaf_file_lazy};
 use crate::zip::{load_from_zip_graph, CompressType};
 use crate::clog::init_logger;
+use crate::error::*;
 use log::*;
 use regex::Regex;
 use rayon::prelude::*;
@@ -23,6 +24,8 @@ use dashmap::DashMap;
 
 use grb::prelude::*;
 use grb::expr::LinExpr;
+
+use coin_cbc::{Model as CbcModel, Sense};
 
 use nalgebra::{DMatrix, RowDVector};
 
@@ -59,6 +62,13 @@ fn check_args_valid(args: &ProfileArgs, input_file: &mut InputFile) {
     };
 
     init_logger(level);
+
+    if args.strain {
+        info!(
+            "strain profiling main parameters: unique_trio_fraction: {}, strain_cov_diff: {}, single_cov_ratio: {}, threads: {}", 
+            args.unique_trio_nodes_fraction, args.unique_trio_nodes_mean_count_f, args.single_cov_ratio, args.threads
+        )
+    }
 
     rayon::ThreadPoolBuilder::new().num_threads(args.threads).build_global().unwrap();
 
@@ -487,15 +497,15 @@ fn read_gfa(gfa_file: &Path, previous: usize) -> Result<Graph, Box<dyn std::erro
                 continue;
             }
 
-            let reverse_flag ;
+            // let reverse_flag ;
             let haplotype_id: String;
-            let mut path: Vec<usize>;
+            let path: Vec<usize>;
 
             if parts[0] == "W" {
                 // W line
                 haplotype_id = parts[1].to_string();
                 let last_field = parts.last().unwrap_or(&"");
-                reverse_flag = last_field.starts_with('<');
+                // reverse_flag = last_field.starts_with('<');
 
                 path = re_w.find_iter(last_field)
                     .map(|mat| {
@@ -507,7 +517,7 @@ fn read_gfa(gfa_file: &Path, previous: usize) -> Result<Graph, Box<dyn std::erro
                 // P line
                 haplotype_id = parts[1].split('#').next().unwrap_or("").to_string();
                 let path_field = parts.get(2).unwrap_or(&"");
-                reverse_flag = path_field.split(',').next().unwrap_or("").ends_with('-');
+                // reverse_flag = path_field.split(',').next().unwrap_or("").ends_with('-');
 
                 path = re_p.find_iter(path_field)
                     .map(|mat| {
@@ -517,9 +527,9 @@ fn read_gfa(gfa_file: &Path, previous: usize) -> Result<Graph, Box<dyn std::erro
                     .collect();
             }
 
-            if reverse_flag {
-                path.reverse();
-            }
+            // if reverse_flag {
+            //     path.reverse();
+            // }
 
             // merge same haplotype_id
             // # Multiple chromosomes from the same genome merge into one path. 
@@ -647,11 +657,23 @@ fn trio_nodes_info(graph: &Graph) -> (HashMap<(usize, usize, usize), usize>, Vec
     let mut trio_nodes_set = HashSet::new();
     let mut hap_trio_paths = HashMap::new();
     let haps: Vec<String> = graph.paths.keys().cloned().collect();
+    
+    // println!("haps: {:?}", haps);
 
     // construct hap → trio_path
     for (hap, path) in &graph.paths {
+        // if path.windows(3).any(|w| w == [27, 29, 30]) {
+        //     println!("Found (27,29,30) in path {:?}", hap);
+        // }
         let trio_path: Vec<(usize, usize, usize)> = path.windows(3)
-            .map(|w| (w[0], w[1], w[2]))
+            // .map(|w| (w[0], w[1], w[2]))
+            .map(|w| {
+                if w[0] > w[2] {
+                    (w[2], w[1], w[0])
+                } else {
+                    (w[0], w[1], w[2])
+                }
+            })
             .collect();
         trio_nodes_set.extend(trio_path.iter().cloned());
         hap_trio_paths.insert(hap.clone(), trio_path);
@@ -668,6 +690,10 @@ fn trio_nodes_info(graph: &Graph) -> (HashMap<(usize, usize, usize), usize>, Vec
                 if let Some(&idx) = trio_index_map.get(t) {
                     presence_matrix[(idx, hap_idx)] = 1;
                     count_per_trio[idx] += 1;
+                    // // for debug
+                    // if *t == (293380, 293382, 293383) {
+                    //     println!("count_per_trio: {}", count_per_trio[idx])
+                    // }
                 }
             }
         }
@@ -694,11 +720,18 @@ fn trio_nodes_info(graph: &Graph) -> (HashMap<(usize, usize, usize), usize>, Vec
     };
 
     // // for debug
+    // use std::io::Write;
     // let file = File::create("unique_trio_nodes.txt").unwrap();
-    // let mut writer = BufWriter::new(file);
-    // writeln!(writer, "i,j,k,value").unwrap();
-    // for (&(i, j, k), &v) in unique_trio_nodes.iter() {
-    //     writeln!(writer, "{},{},{},{}", i, j, k, v).unwrap();
+    // let mut writer = std::io::BufWriter::new(file);
+    // // writeln!(writer, "i,j,k,value").unwrap();
+    // // for (&(i, j, k), &v) in unique_trio_nodes.iter() {
+    // //     writeln!(writer, "{},{},{},{}", i, j, k, v).unwrap();
+    // // }
+    // let mut sorted_entries: Vec<_> = unique_trio_nodes.iter().collect();
+    // sorted_entries.sort_by_key(|(&(i, j, k), _)| (i, j, k));
+    
+    // for (&(i, j, k), &v) in sorted_entries {
+    //     writeln!(writer, "{},{},{}\t{}", i, j, k, v).unwrap();
     // }
 
     (unique_trio_nodes, unique_lengths, final_matrix)
@@ -762,7 +795,7 @@ fn get_node_abundances(
 
         let start_node = read_nodes[0];
         let end_node = *read_nodes.last().unwrap();
-        let target_len = read.read_end - read.read_start;
+        let mut target_len = read.read_end - read.read_start;
         let mut seen = 0;
         let mut read_nodes_len: HashMap<usize, i64> = HashMap::new();
         let mut undup_read_nodes = HashSet::new();
@@ -820,10 +853,17 @@ fn get_node_abundances(
                     // dbg!(otu, &read.read_id, i, node, node_len, read.read_start);
                     (node_len - read.read_start, read.read_start)
                 } else if i == read_nodes.len() - 1 {
+                    if target_len < seen { target_len = seen }
                     (target_len - seen, 0)
                 } else {
                     (node_len, 0)
                 };
+                
+                // // for debug
+                // if node == 146059usize {
+                //     let origin_node = node + 1 + start;
+                //     println!("read id: {}, node: {}, origin_node: {}, node aln len: {}, start idx: {}", read.read_id, node, origin_node, node_aln_len, start_idx)
+                // }
 
                 if let Some(mut entry) = node_base_cov_info.get_mut(&node) {
                     for j in start_idx as usize..((start_idx + node_aln_len) as usize).min(entry.2.len()) {
@@ -840,14 +880,6 @@ fn get_node_abundances(
                 }
             }
         }
-
-        // // for debug
-        // use std::io::Write;
-        // let file = File::create(format!("{otu}_base_aln.txt")).unwrap();
-        // let mut writer = std::io::BufWriter::new(file);
-        // for entry in bases_per_node.iter() {
-        //     writeln!(writer, "{}\t{}", entry.key(), entry.value()).unwrap();
-        // }
 
         if read_nodes.len() < 3 {
             return;
@@ -885,12 +917,61 @@ fn get_node_abundances(
     });
 
     // // for debug
-    // if otu.clone() == "Myxococcus_xanthus".to_string() {
-    //     let file = File::create("trio_nodes_bases_count.txt").unwrap();
-    //     let mut writer = BufWriter::new(file);
+    // if otu.clone() == "Myxococcus_xanthus".to_string() || otu == "173" {
+    //     use std::io::Write;
+    //     let file = File::create(format!("{otu}_trio_nodes_bases_count.txt")).unwrap();
+    //     let mut writer = std::io::BufWriter::new(file);
     //     for entry in trio_nodes_bases_count.iter() {
-    //         writeln!(writer, "{},{}", entry.key(), entry.value()).unwrap();
+    //         if *entry.value() > 0 { writeln!(writer, "{}\t{}", entry.key(), entry.value()).unwrap() }
     //     }
+    // }
+
+    // // for debug
+    // if otu == "173" || otu == "9" {
+    //     use std::io::Write;
+    //     let file = File::create(format!("{otu}_trio_nodes_bases_count.txt")).unwrap();
+    //     let mut writer = std::io::BufWriter::new(file);
+    //     let mut data: Vec<(usize, i64)> = trio_nodes_bases_count
+    //         .par_iter()
+    //         .filter_map(|e| {
+    //             let k = *e.key();
+    //             let v = *e.value();
+    //             (v > 0).then_some((k, v))
+    //         })
+    //         .collect();
+    
+    //     data.par_sort_unstable_by_key(|(k, _)| *k);
+    
+    //     let mut buffer = String::with_capacity(data.len() * 12);
+    //     for (i, val) in data {
+    //         buffer.push_str(&format!("{i}\t{val}\n"));
+    //     }
+    
+    //     writer.write_all(buffer.as_bytes()).unwrap();
+    // }
+
+    // // for debug
+    // if otu == "173" || otu == "9" {
+    //     use std::io::Write;
+    //     let file = File::create(format!("{otu}_base_aln.txt")).unwrap();
+    //     let mut writer = std::io::BufWriter::new(file);
+    //     let mut data: Vec<(usize, i64)> = bases_per_node
+    //         .par_iter()
+    //         .filter_map(|e| {
+    //             let k = *e.key();
+    //             let v = *e.value();
+    //             (v > 0).then_some((k, v))
+    //         })
+    //         .collect();
+    
+    //     data.par_sort_unstable_by_key(|(k, _)| *k);
+    
+    //     let mut buffer = String::with_capacity(data.len() * 12);
+    //     for (i, val) in data {
+    //         buffer.push_str(&format!("{i}\t{val}\n"));
+    //     }
+    
+    //     writer.write_all(buffer.as_bytes()).unwrap();
     // }
 
     // rayon calculate abundance
@@ -905,6 +986,20 @@ fn get_node_abundances(
             base_cov as f64 / len as f64
         })
         .collect();
+
+    // // for debug
+    // if otu == "173" || otu == "9" {
+    //     use std::io::Write;
+    //     let file = File::create(format!("{otu}_node_depth.txt")).unwrap();
+    //     let mut writer = std::io::BufWriter::new(file);
+    
+    //     let mut buffer = String::with_capacity(node_abundance_vec.len());
+    //     for (i, val) in node_abundance_vec.iter().enumerate() {
+    //         if *val > 0.0 { buffer.push_str(&format!("{i}\t{val}\n")) }
+    //     }
+    
+    //     writer.write_all(buffer.as_bytes()).unwrap();
+    // }
 
     let trio_node_abundance_vec: Vec<f64> = trio_nodes_len
         .par_iter()
@@ -1056,7 +1151,7 @@ fn first_filter_paths(
                         _shift_unique_trio_nodes_fraction
                     }
                 } else {
-                    unique_trio_nodes_fraction * frequencies_mean
+                    args.unique_trio_nodes_fraction * frequencies_mean
                 };
                 debug!("\t\t{} unique trio node abundance > 0 ratio: {}, shift unique trio nodes fraction: {}, frequencies mean: {}", hap_id, unique_trio_nodes_fraction, shift_unique_trio_nodes_fraction, frequencies_mean);
                 
@@ -1085,7 +1180,7 @@ fn first_filter_paths(
 
             gurobi_opt_var.possible_paths_idx.push(hap_idx);
         };
-        debug!("\t\tFisrt filter #strains / #paths = {} / {}", gurobi_opt_var.possible_paths_idx.len(), orign_n_haps);
+        debug!("\t\tFirst filter #strains / #paths = {} / {}", gurobi_opt_var.possible_paths_idx.len(), orign_n_haps);
         // filtered_haps.push(hap_id.clone());
     } else if orign_n_haps != 1 && hap2trio_nodes_m_size == 0 {
         let mut paths_vec = paths.values();
@@ -1197,7 +1292,6 @@ fn sample_sorted(vec: &Vec<usize>, sample_size: usize, seed: u64) -> Vec<usize> 
     sampled
 }
 
-#[allow(unused_variables)]
 fn gurobi_opt(
     gurobi_opt_var: &mut GurobiOptVar,
     nvert: usize,
@@ -1296,7 +1390,7 @@ fn gurobi_opt(
         }
     } else if !args.sample_test && args.sample_nodes > 0 {
         if valid_nodes.len() > args.sample_nodes {
-            debug!("The {} species graph has too many nodes. Subsample {}.", gurobi_opt_var.otu, args.sample_test);
+            debug!("The {} species graph has too many nodes. Subsample {}.", gurobi_opt_var.otu, args.sample_nodes);
             sample_sorted(&valid_nodes, args.sample_nodes, 42)
         } else {
             valid_nodes
@@ -1328,7 +1422,7 @@ fn gurobi_opt(
 
     // println!("{}\t{}", gurobi_opt_var.otu, y_var_vec.len());     
     let mut n_eval: usize = 0;
-    for (i, (v, yv)) in y_var_vec.iter().enumerate() {
+    for (_i, (v, yv)) in y_var_vec.iter().enumerate() {
         let row = coeff_matrix.row(*v);
         let mut sumxv = LinExpr::new();
     
@@ -1362,7 +1456,7 @@ fn gurobi_opt(
     // m.set_param(param::Seed, 42)?;
     m.optimize()?;
 
-    assert_eq!(m.status()?, Status::Optimal);
+    assert_eq!(m.status()?, grb::Status::Optimal);
     let sols = m.get_obj_attr_batch(attr::X, x_vec.clone())?;
     let objval = m.get_attr(attr::ObjVal)?;
     debug!("\t\t{}\t{:?}\t{}", gurobi_opt_var.otu, sols, objval);
@@ -1392,7 +1486,7 @@ fn gurobi_opt(
 
     m.optimize()?;
 
-    assert_eq!(m.status()?, Status::Optimal);
+    assert_eq!(m.status()?, grb::Status::Optimal);
     let sols2 = m.get_obj_attr_batch(attr::X, x_vec)?;
     let objval2 = m.get_attr(attr::ObjVal)?;
     debug!("\t\t{}\t{:?}\t{}", gurobi_opt_var.otu, sols2, objval2);
@@ -1414,6 +1508,984 @@ fn gurobi_opt(
 }
 
 
+fn cbc_opt(
+    gurobi_opt_var: &mut GurobiOptVar,
+    nvert: usize,
+    paths: &BTreeMap<String, Vec<usize>>,
+    node_abundance_vec: &Vec<f64>,
+    node_base_cov: &Vec<usize>,
+    node_len: &Vec<i64>,
+    args: &ProfileArgs,
+) -> Result<(), CbcError> {
+    let mut model = CbcModel::default();
+
+    let npaths = gurobi_opt_var.possible_paths_idx.len();
+
+    let max_val = node_abundance_vec
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+
+    // 1. create x[i]
+    let mut var_map = HashMap::new();
+    let mut x_vec = Vec::new();
+    
+    for i in 0..npaths {
+        let var = model.add_col();
+        model.set_continuous(var);
+        model.set_col_lower(var, 0.0);
+        model.set_col_upper(var, 1.05 * max_val);
+        var_map.insert(i, var);
+        x_vec.push(var);
+    }
+
+    // 2. create path matrix
+    let mut coeff_matrix = DMatrix::<f64>::zeros(nvert, npaths);
+    for (i, path) in paths.values().enumerate() {
+        if let Some(pos_idx) = gurobi_opt_var.possible_paths_idx.iter().position(|&x| x == i) {
+            for &v in path.iter() {
+                coeff_matrix[(v, pos_idx)] = 1.0;
+            }
+        }
+    }
+
+    let node_cov_matrix = RowDVector::<f64>::from_iterator(
+        nvert,
+        node_base_cov.iter().map(|&x| x as f64),
+    );
+    let path_cov = node_cov_matrix.clone() * &coeff_matrix;
+
+    let node_len_matrix = RowDVector::<f64>::from_iterator(
+        nvert,
+        node_len.iter().map(|&x| x as f64),
+    );
+    let path_len = node_len_matrix.clone() * &coeff_matrix;
+
+    let path_ratio = path_cov.component_div(&path_len);
+
+    for (i, ratio) in path_ratio.iter().enumerate() {
+        gurobi_opt_var.hap_metrics[gurobi_opt_var.possible_paths_idx[i]].path_cov_ratio = Some(*ratio);
+    }
+
+    // 3. strain indicator
+    if npaths > 0 {
+        let mut x_binary_var_map = HashMap::new();
+        let mut all_binary_vars = Vec::new();
+    
+        for i in 0..npaths {
+            let var = model.add_binary();
+            x_binary_var_map.insert(i, var);
+            all_binary_vars.push(var);
+    
+            let row = model.add_row();
+            model.set_row_lower(row, -args.minimization_min_cov / (2.0 * max_val));
+            model.set_weight(row, var, 1.0);
+            model.set_weight(row, var_map[&i], -(1.0 / (2.0 * max_val)));
+        }
+    
+        let row_total = model.add_row();
+        model.set_row_upper(row_total, npaths as f64);
+        for &var in &all_binary_vars {
+            model.set_weight(row_total, var, 1.0);
+        }
+    }
+
+    // 4. add y[v]
+    let valid_nodes: Vec<usize> = node_abundance_vec.iter().enumerate()
+        .filter(|&(_, &ab)| ab > 0.0)
+        .map(|(i, _)| i)
+        .collect();
+
+    let sample_valid_nodes = if args.sample_test {
+        if valid_nodes.len() > 500 {
+            sample_sorted(&valid_nodes, 500, 42)
+        } else {
+            valid_nodes
+        }
+    } else if args.sample_nodes > 0 {
+        if valid_nodes.len() > args.sample_nodes {
+            sample_sorted(&valid_nodes, args.sample_nodes, 42)
+        } else {
+            valid_nodes
+        }
+    } else {
+        valid_nodes
+    };
+
+    let mut y_var_vec = Vec::with_capacity(sample_valid_nodes.len());
+
+    for &v in &sample_valid_nodes {
+        let yv = model.add_col();
+        model.set_continuous(yv);
+        model.set_col_lower(yv, 0.0); // y ≥ 0
+        y_var_vec.push((v, yv));
+    }
+    
+    let mut n_eval = 0;
+    
+    for (_i, (v, yv)) in y_var_vec.iter().enumerate() {
+        let row = coeff_matrix.row(*v);
+        let abundance = node_abundance_vec[*v];
+        
+        // y_v - sumxv ≥ -abundance
+        let r1 = model.add_row();
+        model.set_row_lower(r1, -abundance);
+        model.set_weight(r1, *yv, 1.0);
+        for (j, val) in row.iter().enumerate() {
+            if val.abs() > 1e-12 {
+                if let Some(&xj) = var_map.get(&j) {
+                    model.set_weight(r1, xj, -(*val as f64));
+                }
+            }
+        }
+        
+        // y_v + sumxv ≥ abundance
+        let r2 = model.add_row();
+        model.set_row_lower(r2, abundance);
+        model.set_weight(r2, *yv, 1.0);
+        for (j, val) in row.iter().enumerate() {
+            if val.abs() > 1e-12 {
+                if let Some(&xj) = var_map.get(&j) {
+                    model.set_weight(r2, xj, *val as f64);
+                }
+            }
+        }
+    
+        n_eval += 1;
+    }
+
+    for (_v, yv) in &y_var_vec {
+        model.set_obj_coeff(*yv, 1.0 / n_eval as f64);
+    }
+    model.set_obj_sense(Sense::Minimize);
+    model.set_parameter("log", "0");
+    model.set_parameter("threads", &args.gurobi_threads.to_string());
+    let solution = model.solve();
+
+    assert_eq!(solution.raw().status(), coin_cbc::raw::Status::Finished);
+    
+    let sols: Vec<f64> = x_vec.iter().map(|col| solution.col(*col)).collect();
+    
+    let objval = solution.raw().obj_value();
+
+    debug!("\t\t{}\t{:?}\t{}", gurobi_opt_var.otu, sols, objval);
+
+    for (i, sol) in sols.iter().enumerate() {
+        gurobi_opt_var.hap_metrics[gurobi_opt_var.possible_paths_idx[i]].first_sol = Some(*sol);
+    }
+
+    let nstrains = sols.iter().filter(|&&x| x > 0.0).count();
+    debug!("\t\tFirst optimization #strains / #paths = {} / {}", nstrains, npaths);
+
+    second_filter_paths(gurobi_opt_var, &args);   
+    if !gurobi_opt_var.second_opt {
+        if args.debug { print!("\n"); }
+        return Ok(());
+    }
+
+    debug!("\t\tSecond filter #strains / #paths = {} / {}", gurobi_opt_var.second_possible_paths_idx.len(), npaths); 
+
+    let mut model2 = model.clone(); 
+
+    for (i, possible_path_idx) in gurobi_opt_var.possible_paths_idx.iter().enumerate() {
+        if !gurobi_opt_var.second_possible_paths_idx.contains(possible_path_idx) {
+            let row = model2.add_row();
+            model2.set_weight(row, x_vec[i], 1.0);
+            model2.set_row_equal(row, 0.0);
+        }
+    }
+    
+    let sol = model2.solve();
+    
+    assert_eq!(sol.raw().status(), coin_cbc::raw::Status::Finished);
+    
+    let sols2: Vec<f64> = x_vec.iter().map(|&col| sol.col(col)).collect();
+    let objval2 = sol.raw().obj_value();
+    
+    debug!(
+        "\t\t{}\t{:?}\t{}",
+        gurobi_opt_var.otu, sols2, objval2
+    );
+    
+    let nstrains2 = sols2.iter().filter(|&&x| x > 0.0).count();
+    debug!(
+        "\t\tSecond optimization #strains / #paths = {} / {}\n",
+        nstrains2, npaths
+    );
+
+    for (&path_idx, sol) in gurobi_opt_var.possible_paths_idx.iter().zip(sols2) {
+        if gurobi_opt_var.second_possible_paths_idx.contains(&path_idx) {
+            if let Some(metric) = gurobi_opt_var.hap_metrics.get_mut(path_idx) {
+                metric.second_sol = Some(sol);
+            } else {
+                panic!("path_idx {} out of bounds for hap_metrics (len = {})", path_idx, gurobi_opt_var.hap_metrics.len());
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "glpk_rust")]
+use glpk_rust::*;
+#[cfg(feature = "glpk_rust")]
+fn glpk_opt(
+    gurobi_opt_var: &mut GurobiOptVar,
+    nvert: usize,
+    paths: &BTreeMap<String, Vec<usize>>,
+    node_abundance_vec: &Vec<f64>,
+    node_base_cov: &Vec<usize>, 
+    node_len: &Vec<i64>,
+    args: &ProfileArgs,
+) -> Result<(), SolverError> {
+
+    let npaths = gurobi_opt_var.possible_paths_idx.len();
+    let max_val = node_abundance_vec
+        .iter()             
+        .copied()  
+        .fold(f64::NEG_INFINITY, f64::max);
+
+    let mut coeff_matrix = DMatrix::<f32>::zeros(nvert, npaths);
+    for (i, path) in paths.values().enumerate() {
+        if let Some(pos_idx) = gurobi_opt_var.possible_paths_idx.iter().position(|&x| x == i) {
+            for &v in path.iter() {
+                coeff_matrix[(v, pos_idx)] = 1.0;
+            }
+        }
+    }
+
+    let node_cov_matrix = RowDVector::<f32>::from_iterator(
+        nvert,
+        node_base_cov.iter().map(|&x| x as f32),
+    );
+    let path_cov = node_cov_matrix * &coeff_matrix;
+
+    let node_len_matrix = RowDVector::<f32>::from_iterator(
+        nvert,
+        node_len.iter().map(|&x| x as f32),
+    );
+    let path_len = node_len_matrix * &coeff_matrix;
+
+    let path_ratio = path_cov.component_div(&path_len);
+    for (i, ratio) in path_ratio.iter().enumerate() {
+        gurobi_opt_var.hap_metrics[gurobi_opt_var.possible_paths_idx[i]].path_cov_ratio = Some(*ratio as f64);
+    }
+
+    let valid_nodes: Vec<usize> = node_abundance_vec
+        .iter()
+        .enumerate()
+        .filter(|&(_v, &ab)| ab > 0.0)
+        .map(|(v, _)| v)
+        .collect();
+
+    let sample_valid_nodes = if args.sample_test {
+        if valid_nodes.len() > 500 {
+            sample_sorted(&valid_nodes, 500, 42)
+        } else {
+            valid_nodes
+        }
+    } else if !args.sample_test && args.sample_nodes > 0 {
+        if valid_nodes.len() > args.sample_nodes {
+            sample_sorted(&valid_nodes, args.sample_nodes, 42)
+        } else {
+            valid_nodes
+        }
+    } else {
+        valid_nodes
+    };
+
+
+    // number = npaths (x_j) + sample_valid_nodes.len() (y_v)
+    let nvars = npaths + sample_valid_nodes.len();
+
+    // x_j: id = "x{j}", bound = [0, 1.05 * max_val]
+    // y_v: id = "y{v}", bound = [0, max_val]
+    let mut variables = Vec::with_capacity(nvars);
+    for j in 0..npaths {
+        variables.push(Variable {
+            id: format!("x{}", j),
+            bound: (0, (1.05 * max_val) as i32),
+        });
+    }
+    for &v in sample_valid_nodes.iter() {
+        variables.push(Variable {
+            id: format!("y{}", v),
+            bound: (0, max_val as i32),
+        });
+    }
+
+    // row = 2 * sample_valid_nodes.len()
+    let nrows = sample_valid_nodes.len() * 2;
+    let mut rows = Vec::new();
+    let mut cols = Vec::new();
+    let mut vals = Vec::new();
+    let mut b = Vec::with_capacity(nrows);
+
+    // y_v - sum_j coeff[v,j] * x_j >= -abundance_v
+    // y_v + sum_j coeff[v,j] * x_j >= abundance_v
+
+    for (idx, &v) in sample_valid_nodes.iter().enumerate() {
+        // idx, idx + n
+        let abundance_v = node_abundance_vec[v] as f64;
+
+        // first (y_v - sum coeff * x_j >= -abundance_v)
+        // equal sum coeff * x_j - y_v <= abundance_v
+
+        // x_j coeff: coeff_matrix[(v, j)], pos j
+        // y_v coeff: -1, pos npaths + idx
+
+        for j in 0..npaths {
+            let val = coeff_matrix[(v, j)] as i32;
+            if val != 0 {
+                rows.push(idx as i32 + 1);
+                cols.push(j as i32 + 1);
+                vals.push(val);
+            }
+        }
+        // y_v
+        rows.push(idx as i32 + 1);
+        cols.push((npaths + idx) as i32 + 1);
+        vals.push(-1);
+
+        b.push((0, abundance_v as i32));
+    }
+
+    for (idx, &v) in sample_valid_nodes.iter().enumerate() {
+        // second (y_v + sum coeff * x_j >= abundance_v)
+        // equal -sum coeff * x_j - y_v <= -abundance_v
+
+        let row_idx = idx + sample_valid_nodes.len();
+        let abundance_v = node_abundance_vec[v] as f64;
+
+        for j in 0..npaths {
+            let val = -(coeff_matrix[(v, j)] as i32);
+            if val != 0 {
+                rows.push(row_idx as i32 + 1);
+                cols.push(j as i32 + 1);
+                vals.push(val);
+            }
+        }
+        // y_v
+        rows.push(row_idx as i32 + 1);
+        cols.push((npaths + idx) as i32 + 1);
+        vals.push(-1);
+
+        b.push((0, (-abundance_v) as i32));
+    }
+
+    // 8. object
+    // for y_v, weight 1/n_eval
+    let mut objective = HashMap::new();
+    let n_eval = sample_valid_nodes.len() as f64;
+    for (_idx, &v) in sample_valid_nodes.iter().enumerate() {
+        objective.insert(format!("y{}", v), 1.0 / n_eval);
+    }
+
+    let objectives = vec![objective];
+
+    let mut polytope = SparseLEIntegerPolyhedron {
+        A: IntegerSparseMatrix {
+            rows,
+            cols,
+            vals,
+            shape: Shape {
+                nrows,
+                ncols: nvars,
+            },
+        },
+        b,
+        variables,
+        double_bound: false,
+    };
+
+    // Add strain indicator constraints
+    if npaths > 0 {
+        let mut idx = polytope.A.rows.len() as i32;
+        for j in 0..npaths {
+            let s_id = format!("s{}", j);
+            polytope.variables.push(Variable {
+                id: s_id.clone(),
+                bound: (0, 1),
+            });
+            polytope.A.shape.ncols += 1;
+
+            idx += 1;
+            polytope.A.rows.push(idx);
+            polytope.A.cols.push(j as i32 + 1); // x_j
+            polytope.A.vals.push(1);
+            polytope.A.rows.push(idx);
+            polytope.A.cols.push(polytope.A.shape.ncols as i32); // s_j
+            polytope.A.vals.push(-2 * (max_val as i32));
+            polytope.b.push((std::i32::MIN, args.minimization_min_cov as i32));
+        }
+    }
+
+    let solutions = solve_ilps(&mut polytope, objectives, false, false);
+
+    if solutions.is_empty() {
+        return Err(SolverError::Glpk(GlpkError::Status(-1)));
+    }
+    let sol = &solutions[0];
+    if sol.status != glpk_rust::Status::Optimal && sol.status != glpk_rust::Status::Feasible {
+        return Err(SolverError::Glpk(GlpkError::Status(sol.status as i32)));
+    }
+
+    let mut first_sols = Vec::new();
+    for (j, &path_idx) in gurobi_opt_var.possible_paths_idx.iter().enumerate() {
+        let x_val = *sol.solution.get(&format!("x{}", j)).unwrap_or(&0);
+        first_sols.push(x_val);
+        gurobi_opt_var.hap_metrics[path_idx].first_sol = Some(x_val as f64);
+    }
+
+    let nstrains = first_sols.iter().filter(|&&x| x > 0).count();
+    debug!("\t\tFirst optimization #strains / #paths = {} / {}", nstrains, npaths);
+
+    second_filter_paths(gurobi_opt_var, &args);   
+    if !gurobi_opt_var.second_opt {
+        if args.debug { print!("\n"); }
+        return Ok(());
+    }    
+
+    debug!("\t\tSecond filter #strains / #paths = {} / {}", gurobi_opt_var.second_possible_paths_idx.len(), npaths); 
+
+    for (j, path_idx) in gurobi_opt_var.possible_paths_idx.iter().enumerate() {
+        if !gurobi_opt_var.second_possible_paths_idx.contains(path_idx) {
+            let row_id = polytope.A.rows.len() as i32 + 1;
+            polytope.A.rows.push(row_id);
+            polytope.A.cols.push((j + 1) as i32);
+            polytope.A.vals.push(1);
+            polytope.b.push((0, 0)); // x_j == 0
+        }
+    }
+
+    let second_solutions = solve_ilps(&mut polytope, objectives.clone(), false, false);
+    if second_solutions.is_empty() {
+        return Err(SolverError::Glpk(GlpkError::Status(-1)));
+    }
+    let sol2 = &second_solutions[0];
+    if sol2.status != glpk_rust::Status::Optimal && sol2.status != glpk_rust::Status::Feasible {
+        return Err(SolverError::Glpk(GlpkError::Status(sol2.status as i32)));
+    }
+
+    for (j, &path_idx) in gurobi_opt_var.possible_paths_idx.iter().enumerate() {
+        if gurobi_opt_var.second_possible_paths_idx.contains(&path_idx) {
+            if let Some(metric) = gurobi_opt_var.hap_metrics.get_mut(path_idx) {
+                if let Some(sol_val) = sol2.solution.get(&format!("x{}", j)) {
+                    metric.second_sol = Some(*sol_val as f64);
+                }
+            }
+        }
+    }
+
+    let nstrains2 = gurobi_opt_var.second_possible_paths_idx.iter().filter(|&&pidx| {
+        sol2.solution.get(&format!("x{}", pidx)).map_or(false, |&x| x > 0)
+    }).count();
+
+    debug!(
+        "\t\tSecond optimization #strains / #paths = {} / {}",
+        nstrains2, npaths
+    );    
+
+    Ok(())
+}
+
+#[cfg(feature = "glpk")]
+use glpk_sys::{
+    glp_create_prob, glp_set_prob_name, glp_set_obj_dir, glp_add_cols, glp_set_col_name,
+    glp_set_col_bnds, glp_set_obj_coef, glp_set_col_kind, glp_add_rows, glp_set_row_name,
+    glp_set_row_bnds, glp_load_matrix, glp_mip_col_val, glp_delete_prob, glp_init_iocp, glp_intopt,
+    glp_get_obj_val, glp_term_out
+};
+#[cfg(feature = "glpk")]
+use std::ffi::CString;
+#[cfg(feature = "glpk")]
+use crate::consts::*;
+#[cfg(feature = "glpk")]
+fn glpk_opt_unsafe(
+    gurobi_opt_var: &mut GurobiOptVar,
+    nvert: usize,
+    paths: &BTreeMap<String, Vec<usize>>,
+    node_abundance_vec: &Vec<f64>,
+    node_base_cov: &Vec<usize>, 
+    node_len: &Vec<i64>,
+    args: &ProfileArgs,
+) -> Result<(), SolverError> {
+    let npaths = gurobi_opt_var.possible_paths_idx.len();
+    let max_val = node_abundance_vec
+        .iter()             
+        .copied()  
+        .fold(f64::NEG_INFINITY, f64::max);
+
+    let mut coeff_matrix = DMatrix::<f32>::zeros(nvert, npaths);
+    for (i, path) in paths.values().enumerate() {
+        if let Some(pos_idx) = gurobi_opt_var.possible_paths_idx.iter().position(|&x| x == i) {
+            for &v in path.iter() {
+                coeff_matrix[(v, pos_idx)] = 1.0;
+            }
+        }
+    }
+
+    let node_cov_matrix = RowDVector::<f32>::from_iterator(
+        nvert,
+        node_base_cov.iter().map(|&x| x as f32),
+    );
+    let path_cov = node_cov_matrix * &coeff_matrix;
+
+    let node_len_matrix = RowDVector::<f32>::from_iterator(
+        nvert,
+        node_len.iter().map(|&x| x as f32),
+    );
+    let path_len = node_len_matrix * &coeff_matrix;
+
+    let path_ratio = path_cov.component_div(&path_len);
+    for (i, ratio) in path_ratio.iter().enumerate() {
+        gurobi_opt_var.hap_metrics[gurobi_opt_var.possible_paths_idx[i]].path_cov_ratio = Some(*ratio as f64);
+    }
+
+    let valid_nodes: Vec<usize> = node_abundance_vec
+        .iter()
+        .enumerate()
+        .filter(|&(_v, &ab)| ab > 0.0)
+        .map(|(v, _)| v)
+        .collect();
+
+    let sample_valid_nodes = if args.sample_test {
+        if valid_nodes.len() > 500 {
+            sample_sorted(&valid_nodes, 500, 42)
+        } else {
+            valid_nodes
+        }
+    } else if !args.sample_test && args.sample_nodes > 0 {
+        if valid_nodes.len() > args.sample_nodes {
+            sample_sorted(&valid_nodes, args.sample_nodes, 42)
+        } else {
+            valid_nodes
+        }
+    } else {
+        valid_nodes
+    };
+
+    unsafe {
+        let lp = glp_create_prob();
+        glp_term_out(0);
+        glp_set_prob_name(lp, CString::new("lp").unwrap().as_ptr());
+        glp_set_obj_dir(lp, GLP_MIN);
+
+        // 1. Add path variables x (continuous variables)
+        // debug!("Add path variables x...");
+        glp_add_cols(lp, (2*npaths + sample_valid_nodes.len()) as i32);
+
+        for i in 0..npaths {
+            let col_idx = (i + 1) as i32;
+            glp_set_col_name(lp, col_idx, CString::new(format!("x{}", i)).unwrap().as_ptr());
+            glp_set_col_bnds(lp, col_idx, GLP_DB, 0.0, 1.05 * max_val);
+            glp_set_obj_coef(lp, col_idx, 0.0);
+            glp_set_col_kind(lp, col_idx, GLP_CV); // continuous variable
+        }
+
+        // 2. Add binary variables indicator_x
+        // GLPK requires variables to be added before setting type, so set type here
+        // Binary variable indices start after the x variables
+        // debug!("Add binary variables indicator_x...");
+        for i in 0..npaths {
+            let col_idx = (npaths + 1 + i) as i32;
+            glp_set_col_name(lp, col_idx, CString::new(format!("strain_indicator_{}", i)).unwrap().as_ptr());
+            glp_set_col_bnds(lp, col_idx, GLP_DB, 0.0, 1.0);
+            glp_set_col_kind(lp, col_idx, GLP_BV); // binary variable
+            glp_set_obj_coef(lp, col_idx, 0.0);
+        }
+
+        // 3. Add y variables (continuous variables) - indices continue after binary vars
+        // debug!("Add y variables...");
+        let y_start = (npaths * 2 + 1) as i32;
+        for (idx, &v) in sample_valid_nodes.iter().enumerate() {
+            let col_idx = y_start + idx as i32;
+            glp_set_col_name(lp, col_idx, CString::new(format!("y{}", v)).unwrap().as_ptr());
+            glp_set_col_bnds(lp, col_idx, GLP_LO, 0.0, 0.0);
+            glp_set_obj_coef(lp, col_idx, 1.0 / sample_valid_nodes.len() as f64);
+            glp_set_col_kind(lp, col_idx, GLP_CV);
+        }
+
+        // 4. Add constraints
+        // Calculate the number of constraints
+        // Constraints for indicator variables + constraints for y variables
+
+        // indicator variable constraints: var >= (x_i - min_cov) * (1 / (2*max_val))
+        // total strains <= npaths
+        // y variable constraints: y >= sumx - abundance, y >= abundance - sumx
+
+        // Calculate total number of constraints
+        let n_indicator_constr = npaths;
+        let n_y_constr = sample_valid_nodes.len() * 2;
+        let total_constr = n_indicator_constr + 1 + n_y_constr;
+
+        glp_add_rows(lp, total_constr as i32);
+
+        // 5. Set constraint names and bounds
+        // indicator constraints
+        for i in 0..npaths {
+            let row_idx = (i + 1) as i32;
+            glp_set_row_name(lp, row_idx, CString::new(format!("s_{}", i)).unwrap().as_ptr());
+            glp_set_row_bnds(lp, row_idx, GLP_LO, - (args.minimization_min_cov / (2.0 * max_val)), 0.0);
+        }
+        // total strains constraint
+        let total_strain_row = (n_indicator_constr + 1) as i32;
+        glp_set_row_name(lp, total_strain_row, CString::new("total_strains").unwrap().as_ptr());
+        glp_set_row_bnds(lp, total_strain_row, GLP_UP, 0.0, npaths as f64);
+
+        // y constraints
+        for (idx, &v) in sample_valid_nodes.iter().enumerate() {
+            let row_minus = (n_indicator_constr + 1 + 2 * idx) as i32;
+            let row_plus = (n_indicator_constr + 1 + 2 * idx + 1) as i32;
+            glp_set_row_name(lp, row_minus, CString::new(format!("y_{}_minus", v)).unwrap().as_ptr());
+            glp_set_row_name(lp, row_plus, CString::new(format!("y_{}_plus", v)).unwrap().as_ptr());
+            glp_set_row_bnds(lp, row_minus, GLP_LO, -node_abundance_vec[v], 0.0);
+            glp_set_row_bnds(lp, row_plus, GLP_LO, node_abundance_vec[v], 0.0);
+        }
+
+        // 6. Build constraint matrix (ia, ja, ar)
+        // Need to construct sparse matrix
+        // Estimate number of non-zero elements and allocate Vec capacity
+        let mut ia = Vec::new();
+        let mut ja = Vec::new();
+        let mut ar = Vec::new();
+
+        // indicator variable constraints:
+        // s_i: indicator_i >= (x_i - min_cov)*(1/(2*max_val))
+        // rewritten as: indicator_i - (1/(2*max_val)) * x_i >= -(min_cov / (2*max_val))
+        for i in 0..npaths {
+            let row_idx = (i + 1) as i32;
+            // coefficient 1 for indicator_i
+            ia.push(row_idx);
+            ja.push((npaths + 1 + i) as i32); // indicator variable index
+            ar.push(1.0);
+            // coefficient -(1/(2*max_val)) for x_i
+            ia.push(row_idx);
+            ja.push((i + 1) as i32);
+            ar.push(-(1.0 / (2.0 * max_val)));
+        }
+
+        // total strains constraint: sum indicator_i <= npaths
+        let total_strain_row = (n_indicator_constr + 1) as i32;
+        for i in 0..npaths {
+            ia.push(total_strain_row);
+            ja.push((npaths + 1 + i) as i32);
+            ar.push(1.0);
+        }
+
+        // y constraints
+        // y_v - sum_j coeff_matrix(v,j)*x_j >= -abundance
+        // y_v + sum_j coeff_matrix(v,j)*x_j >= abundance
+        for (idx, &v) in sample_valid_nodes.iter().enumerate() {
+            let row_minus = (n_indicator_constr + 1 + 2 * idx) as i32;
+            let row_plus = (n_indicator_constr + 1 + 2 * idx + 1) as i32;
+
+            let y_col_idx = y_start + idx as i32;
+            ia.push(row_minus);
+            ja.push(y_col_idx);
+            ar.push(1.0);
+
+            ia.push(row_plus);
+            ja.push(y_col_idx);
+            ar.push(1.0);
+
+            for (j, val) in coeff_matrix.row(v).iter().enumerate() {
+                if val.abs() > 1e-12 {
+                    let x_col_idx = (j + 1) as i32;
+                    ia.push(row_minus);
+                    ja.push(x_col_idx);
+                    ar.push(-(*val as f64));
+
+                    ia.push(row_plus);
+                    ja.push(x_col_idx);
+                    ar.push(*val as f64);
+                }
+            }
+        }
+
+        // 7. Load matrix (GLPK is 1-based, first element is dummy)
+        ia.insert(0, 0);
+        ja.insert(0, 0);
+        ar.insert(0, 0.0);
+
+        glp_load_matrix(lp, (ia.len() - 1) as i32, ia.as_mut_ptr(), ja.as_mut_ptr(), ar.as_mut_ptr());
+
+        // 8. Solve
+        //Solve MILP problem with glp_intopt
+        let mut iocp = std::mem::MaybeUninit::<glpk_sys::glp_iocp>::uninit();
+        glp_init_iocp(iocp.as_mut_ptr());
+        let mut iocp = iocp.assume_init();
+        iocp.presolve = GLP_ON; // presolve
+        // iocp.tm_lim = 10000;
+
+        let ret = glp_intopt(lp, &iocp);
+        if ret != 0 {
+            glp_delete_prob(lp);
+            return Err(SolverError::Glpk(GlpkError::Status(ret)));
+        }
+
+        // 7. Retrieve solution using glp_mip_col_val (MILP解)
+        let mut sols = Vec::new();
+        for i in 0..npaths {
+            let val = glp_mip_col_val(lp, (i + 1) as i32);
+            sols.push(val);
+            gurobi_opt_var.hap_metrics[gurobi_opt_var.possible_paths_idx[i]].first_sol = Some(val);
+        }
+
+        let objval = glp_get_obj_val(lp);
+        debug!("\t\t{}\t{:?}\t{}", gurobi_opt_var.otu, sols, objval);
+
+        let nstrains = sols.iter().filter(|&&x| x > 0.0).count();
+        debug!("\t\tFirst optimization #strains / #paths = {} / {}", nstrains, npaths);
+    
+        second_filter_paths(gurobi_opt_var, &args);   
+        if !gurobi_opt_var.second_opt {
+            if args.debug { print!("\n"); }
+            return Ok(());
+        }
+    
+        debug!("\t\tSecond filter #strains / #paths = {} / {}", gurobi_opt_var.second_possible_paths_idx.len(), npaths);     
+
+        for i in 0..npaths {
+            let col_idx = (i + 1) as i32;
+            let path_idx = gurobi_opt_var.possible_paths_idx[i];
+            if !gurobi_opt_var.second_possible_paths_idx.contains(&path_idx) {
+                glp_set_col_bnds(lp, col_idx, GLP_FX, 0.0, 0.0);
+            } else {
+                glp_set_col_bnds(lp, col_idx, GLP_LO, 0.0, 1.05 * max_val);
+            }
+        }
+
+        let ret2 = glp_intopt(lp, &iocp);
+        if ret2 != 0 {
+            glp_delete_prob(lp);
+            return Err(SolverError::Glpk(GlpkError::Status(ret2)));
+        }
+    
+        let mut sols2 = Vec::new();
+        for i in 0..npaths {
+            let val = glp_mip_col_val(lp, (i + 1) as i32);
+            sols2.push(val);
+        }
+        let objval2 = glp_get_obj_val(lp);
+        debug!("\t\t{}\t{:?}\t{}", gurobi_opt_var.otu, sols2, objval2);
+
+        let nstrains2 = sols2.iter().filter(|&&x| x > 0.0).count();
+        debug!("\t\tSecond optimization #strains / #paths = {} / {}\n", nstrains2, npaths);
+    
+        for (&path_idx, sol) in gurobi_opt_var.possible_paths_idx.iter().zip(sols2) {
+            if gurobi_opt_var.second_possible_paths_idx.contains(&path_idx) {
+                if let Some(metric) = gurobi_opt_var.hap_metrics.get_mut(path_idx) {
+                    metric.second_sol = Some(sol);
+                } else {
+                    panic!("path_idx {} out of bounds for hap_metrics (len = {})", path_idx, gurobi_opt_var.hap_metrics.len());
+                }
+            }
+        }
+
+        glp_delete_prob(lp);
+
+    }
+
+    Ok(())        
+}
+
+use highs::{HighsModelStatus, RowProblem, Sense as HighsSense};
+
+fn highs_opt(
+    opt_var: &mut GurobiOptVar,
+    nvert: usize,
+    paths: &BTreeMap<String, Vec<usize>>,
+    node_abundance_vec: &Vec<f64>,
+    node_base_cov: &Vec<usize>,
+    node_len: &Vec<i64>,
+    args: &ProfileArgs,
+) -> Result<(), SolverError> {
+    let npaths = opt_var.possible_paths_idx.len();
+    let max_val = node_abundance_vec
+        .iter()             
+        .copied()  
+        .fold(f64::NEG_INFINITY, f64::max);
+
+    let mut coeff_matrix = DMatrix::<f32>::zeros(nvert, npaths);
+    for (i, path) in paths.values().enumerate() {
+        if let Some(pos_idx) = opt_var.possible_paths_idx.iter().position(|&x| x == i) {
+            for &v in path.iter() {
+                coeff_matrix[(v, pos_idx)] = 1.0;
+            }
+        }
+    }
+
+    let node_cov_matrix = RowDVector::<f32>::from_iterator(
+        nvert,
+        node_base_cov.iter().map(|&x| x as f32),
+    );
+    let path_cov = node_cov_matrix * &coeff_matrix;
+
+    let node_len_matrix = RowDVector::<f32>::from_iterator(
+        nvert,
+        node_len.iter().map(|&x| x as f32),
+    );
+    let path_len = node_len_matrix * &coeff_matrix;
+
+    let path_ratio = path_cov.component_div(&path_len);
+    for (i, ratio) in path_ratio.iter().enumerate() {
+        opt_var.hap_metrics[opt_var.possible_paths_idx[i]].path_cov_ratio = Some(*ratio as f64);
+    }
+
+    let valid_nodes: Vec<usize> = node_abundance_vec
+        .iter()
+        .enumerate()
+        .filter(|&(_v, &ab)| ab > 0.0)
+        .map(|(v, _)| v)
+        .collect();
+
+    let sample_valid_nodes = if args.sample_test {
+        if valid_nodes.len() > 500 {
+            sample_sorted(&valid_nodes, 500, 42)
+        } else {
+            valid_nodes
+        }
+    } else if !args.sample_test && args.sample_nodes > 0 {
+        if valid_nodes.len() > args.sample_nodes {
+            sample_sorted(&valid_nodes, args.sample_nodes, 42)
+        } else {
+            valid_nodes
+        }
+    } else {
+        valid_nodes
+    };
+
+    let mut pb = RowProblem::default();
+    let n_y = sample_valid_nodes.len();
+    
+    let mut x_vars = Vec::new();
+    let mut indicator_vars = Vec::new();
+    let mut y_vars = Vec::new();
+    
+    // 1. Add continuous path variables x_i
+    for _i in 0..npaths {
+        let var = pb.add_column(0.0, 0.0..=1.05 * max_val); // objective coef = 0.0
+        x_vars.push(var);
+    }
+    
+    // 2. Add binary indicator_i variables
+    for _i in 0..npaths {
+        let var = pb.add_integer_column(0.0, 0.0..=1.0); // binary variable
+        indicator_vars.push(var);
+    }
+    
+    // 3. Add continuous y_v variables (objective coef = 1 / N)
+    for &v in &sample_valid_nodes {
+        let var = pb.add_column(1.0 / n_y as f64, 0.0..); // minimize sum y_v
+        y_vars.push((v, var));
+    }
+    
+    // 4. Add constraints for indicator_i ≥ (x_i - min_cov)/(2*max_val)
+    for i in 0..npaths {
+        let terms = vec![
+            (indicator_vars[i], 1.0),
+            (x_vars[i], -1.0 / (2.0 * max_val)),
+        ];
+        let rhs = -(args.minimization_min_cov / (2.0 * max_val));
+        pb.add_row(rhs.., &terms);
+    }
+    
+    // 5. Add constraint: sum indicator_i ≤ npaths
+    let terms: Vec<_> = indicator_vars.iter().map(|&v| (v, 1.0)).collect();
+    pb.add_row(..=npaths as f64, &terms);
+    
+    // 6. Add y_v constraints: y_v ≥ sum(x_j * coeff_j) - abundance[v]
+    for (_i, &(v, yv)) in y_vars.iter().enumerate() {
+        let coeffs: Vec<(highs::Col, f64)> = coeff_matrix.row(v)
+            .iter()
+            .enumerate()
+            .filter(|(_, &val)| val.abs() > 1e-12)
+            .map(|(j, &val)| (x_vars[j], val as f64))
+            .collect();
+
+        // y ≥ sum(x_j * coeff) - abundance[v]
+        let mut row1 = coeffs.clone();
+        row1.push((yv, -1.0));
+        pb.add_row(..node_abundance_vec[v], &row1);
+    
+        // y ≥ abundance[v] - sum(x_j * coeff)
+        let mut row2 = coeffs;
+        row2.push((yv, 1.0));
+        pb.add_row(node_abundance_vec[v].., &row2);
+    }
+    
+    // 7. Solve with HiGHS
+    let mut model = pb.clone().try_optimise(HighsSense::Minimise)?;
+    model.make_quiet();
+    model.set_sense(HighsSense::Minimise);
+    // model.set_option("presolve", "off");
+    // model.set_option("solver", "ipm"); // use the ipm solver
+    // model.set_option("time_limit", 30.0); // stop after 30 seconds
+    model.set_option("parallel", "on");
+    model.set_option("threads", args.gurobi_threads as i32);
+    let solved = model.try_solve()?;
+
+    assert_eq!(solved.status(), HighsModelStatus::Optimal);
+    let solutions = solved.get_solution();
+    let all_sols = solutions.columns();
+    let sols= &all_sols[..all_sols.len().min(npaths)];
+
+    debug!("\t\t{}\t{:?}", opt_var.otu, sols);
+
+    for (i, sol) in sols.iter().enumerate() {
+        opt_var.hap_metrics[opt_var.possible_paths_idx[i]].first_sol = Some(*sol);
+    }
+
+    let nstrains = sols.iter().filter(|&&x| x > 0.0).count();
+    debug!("\t\tFirst optimization #strains / #paths = {} / {}", nstrains, npaths);
+
+    second_filter_paths(opt_var, &args);   
+    if !opt_var.second_opt {
+        if args.debug { print!("\n"); }
+        return Ok(());
+    }
+
+    debug!("\t\tSecond filter #strains / #paths = {} / {}", opt_var.second_possible_paths_idx.len(), npaths); 
+
+    for (i, possible_path_idx) in opt_var.possible_paths_idx.iter().enumerate() {
+        if !opt_var.second_possible_paths_idx.contains(possible_path_idx) {
+            pb.add_row(0.0..=0.0, &[(x_vars[i], 1.0)]);
+        }
+    }
+
+    let mut model2 = pb.try_optimise(HighsSense::Minimise)?;
+    model2.make_quiet();
+    model2.set_sense(HighsSense::Minimise);
+    // model2.set_option("presolve", "off");
+    // model2.set_option("solver", "ipm"); // use the ipm solver
+    // model2.set_option("time_limit", 30.0); // stop after 30 seconds
+    model2.set_option("parallel", "on");
+    model2.set_option("threads", args.gurobi_threads as i32);
+    let solved = model2.try_solve()?;
+
+    assert_eq!(solved.status(), HighsModelStatus::Optimal);
+    let solutions = solved.get_solution();
+    let all_sols = solutions.columns();
+    let sols2= &all_sols[..all_sols.len().min(opt_var.second_possible_paths_idx.len())];
+
+    debug!("\t\t{}\t{:?}", opt_var.otu, sols2);
+    let nstrains2 = sols2.iter().filter(|&&x| x > 0.0).count();
+    debug!("\t\tSecond optimization #strains / #paths = {} / {}\n", nstrains2, npaths);
+
+    for (&path_idx, sol) in opt_var.possible_paths_idx.iter().zip(sols2) {
+        if opt_var.second_possible_paths_idx.contains(&path_idx) {
+            if let Some(metric) = opt_var.hap_metrics.get_mut(path_idx) {
+                metric.second_sol = Some(*sol);
+            } else {
+                panic!("path_idx {} out of bounds for hap_metrics (len = {})", path_idx, opt_var.hap_metrics.len());
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn optimize_otu(args: &ProfileArgs, otu: &String, start: u32, end: u32, reads_cluster: &[Record]) -> Option<Vec<HapMetrics>> {
     log::debug!("Reading {} graph information, start: {}, end: {}", otu, start, end);
     let start = start - 1;
@@ -1433,6 +2505,7 @@ fn optimize_otu(args: &ProfileArgs, otu: &String, start: u32, end: u32, reads_cl
         Some("serialize") => species_gfa_dir.join(format!("{}.bin", otu)),
         Some("lz")        => species_gfa_dir.join(format!("{}.bin.lz4", otu)),
         Some("zstd")      => species_gfa_dir.join(format!("{}.bin.zst", otu)),
+        Some("h5")        => species_gfa_dir.join(format!("{}.h5", otu)),
         _                 => species_gfa_dir.join(format!("{}.gfa", otu)),
     };
 
@@ -1445,6 +2518,9 @@ fn optimize_otu(args: &ProfileArgs, otu: &String, start: u32, end: u32, reads_cl
             .map_err(|e| format!("GFA read error: {}", e)).ok()?,
         Some("zstd")      => load_from_zip_graph(&gfa_file, CompressType::Zstd)
             .map_err(|e| format!("GFA read error: {}", e)).ok()?,
+        #[cfg(feature = "h5")]
+        Some("h5")      => load_from_zip_graph(&gfa_file, CompressType::Hdf5)
+            .map_err(|e| format!("GFA read error: {}", e)).ok()?,            
         _                 => read_gfa(&gfa_file, 0)
             .map_err(|e| format!("GFA read error: {}", e)).ok()?,
     };
@@ -1483,7 +2559,53 @@ fn optimize_otu(args: &ProfileArgs, otu: &String, start: u32, end: u32, reads_cl
         second_opt: false,
     };
     first_filter_paths(&mut gurobi_opt_var, &graph.paths, &hap2unique_trio_nodes_m, &trio_node_abundance_vec, &node_abundance_opt_vec, &args);
-    gurobi_opt(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args).unwrap();
+    if !gurobi_opt_var.possible_paths_idx.is_empty() {
+        match args.solver.to_lowercase().as_str() {
+            "gurobi" => {
+                if let Err(e) = gurobi_opt(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args) {
+                    error!("Gurobi failed: {}", e);
+                    return None;
+                }
+            }
+            "cbc" => {
+                if let Err(e) = cbc_opt(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args) {
+                    error!("Cbc failed: {}", e);
+                    return None;
+                }
+            }
+            #[cfg(feature = "glpk")]
+            "glpk" => {
+                if let Err(e) = glpk_opt_unsafe(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args) {
+                    error!("Glpk failed: {}", e);
+                    return None;
+                }
+            }
+            "highs" => {
+                if let Err(e) = highs_opt(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args) {
+                    error!("Highs failed: {}", e);
+                    return None;
+                }
+            }
+            _ => {
+                log::error!("Unsupported solver: {}", args.solver);
+                return None;
+            }
+        }
+    }
+
+    // if gurobi_opt_var.possible_paths_idx.len() > 0 {
+    //     if args.solver.to_lowercase() == "gurobi" {
+    //         gurobi_opt(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args).unwrap();
+    //     } else if args.solver.to_lowercase() == "cbc" {
+    //         cbc_opt(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args).unwrap();
+    //     } else if args.solver.to_lowercase() == "glpk" {
+    //         // glpk_opt(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args).unwrap();
+    //         #[cfg(feature = "glpk")]
+    //         glpk_opt_unsafe(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args).unwrap();
+    //     } else if args.solver.to_lowercase() == "highs" {
+    //         highs_opt(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args).unwrap();
+    //     }
+    // }
     Some(gurobi_opt_var.hap_metrics)
 }
 

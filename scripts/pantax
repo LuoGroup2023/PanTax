@@ -28,6 +28,7 @@ function print_help() {
   echo "        -g, --save                        Save species graph information."
   echo "            --lz                          Serialized zip graph file saved with lz4 format (for save option)."
   echo "            --zstd                        Serialized zip graph file saved with zstd format (for save option)."
+#   echo "            --h5                          Serialized zip graph file saved with hdf5 format (only used for experimental graph parsing)."
   echo "        --force                           Force to rebuild pangenome."
   echo "        -e file                           Path to pangenome building tool executable file. (default: pggb)" 
   echo "        -A, --ani float                   ANI threshold for sylph query result filter. (default: 99)"                                  
@@ -44,8 +45,9 @@ function print_help() {
   echo "        -lt, --long-read-type str         Long read type (hifi, clr, ontr9, ontr10). Set precise-clipping based on read type."
   echo "        --precise-clipping float          clip the alignment ends with arg as the identity cutoff between correct / wrong alignments. (default: 0.66)"    
   echo "    Abundacnce calculation:"
-  echo "        --species-level                   Species abundance calulation."
-  echo "        --strain-level                    Strain abundance calulation."
+  echo "        --species-level | --species       Species abundance calulation."
+  echo "        --strain-level | --strain         Strain abundance calulation."
+  echo "        --solver str                      MLP solver. (options: gurobi, cbc, glpk, highs. default: gurobi)"
 #   each "        -m, --select                        Select output pangenome result." 
 #   echo "        --parallel-poa                    Parallel POA."
 #   echo "        -ds, --designated_species         Only return the strain result of designated species."
@@ -53,7 +55,8 @@ function print_help() {
   echo "        -a float                          Species with relative abundance above the threshold are used for strain abundance estimation. (default: 0.0001)"
 #   echo "        -fr float                         Unique trio nodes fraction. (default: multi species 0.3/ single species 0.43)"
 #   echo "        -fc float                         Unique trio nodes mean count fraction (default: 0.46)."
-  echo "        -fr float                         The fraction of strain-specific triplet nodes covered by reads for one strain. The larger, the stricter. (default: multi species 0.3/ single species 0.43)"
+  echo "        -fr float                         The fraction of strain-specific triplet nodes covered by reads for one strain. The larger, the stricter." 
+  echo "                                          (default: short multi species 0.3/ short single species 0.43/ long multi species 0.5)"
   echo "        -fc float                         The divergence between first rough and second refined strain abundance estimates. The smaller, the stricter. (default: 0.46)"
   echo "        -sh, --shift bool                 Shifting fraction of strain-specific triplet nodes. (multi-species: off, single-species: on)"
   echo "        -sd float                         Coverage depth difference between the strain and its species, with only one strain. (default: 0.2)"
@@ -94,6 +97,7 @@ create_db="False"
 save="False"
 lz=false
 zstd=false
+h5=false
 force="False"
 pangenome_building_tool="pggb"
 parallel_build="True"
@@ -117,7 +121,8 @@ parallel_poa="True"
 designated_species=None
 isfilter=1
 species_abund_threshold=0.0001
-default_unique_trio_nodes_fraction=0.3
+default_short_unique_trio_nodes_fraction=0.3
+default_long_unique_trio_nodes_fraction=0.5
 unique_trio_nodes_fraction=None
 default_unique_trio_nodes_count=0.46
 unique_trio_nodes_count=None
@@ -127,7 +132,8 @@ default_single_cov_ratio=0.85
 single_cov_ratio=None
 min_cov=0
 min_depth=0
-gurobi_threads=1
+solver=gurobi
+solver_threads=1
 
 sample_test=0
 sample=500000
@@ -163,12 +169,13 @@ while [[ "$1" != "" ]]; do
         "--create") create_db="True"; shift 1;;
         "-g" | "--save") save="True"; shift 1;; 
         "--lz") lz=true; shift 1;;
-        "--zstd") zstd=true; shift 1;;     
+        "--zstd") zstd=true; shift 1;;
+        "--h5") h5=true; shift 1;;     
         "--force") force="True"; shift 1;;
         "-e") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pangenome_building_tool="$2"; shift 2; } ;;
         "--parallel") parallel_build=$2; shift 2;;
         "-A" | "--ani") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { ani_threshold="$2"; shift 2; } ;;
-        # "--mode") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { mode="$2"; shift 2; } ;;
+        "--mode") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { mode="$2"; shift 2; } ;;
         "--fast") mode="1"; shift 1;;
 
         "--index") create_index="True"; shift 1;;
@@ -197,8 +204,9 @@ while [[ "$1" != "" ]]; do
         "-lt" | "--long-read-type") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { long_read_type="$2"; shift 2; };;
         "--precise-clipping") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { precise="$2"; shift 2; };;
 
-        "--strain-level") strain_level_flag="True"; shift 1;;
-        "--species-level") species_level_flag="True"; shift 1;;
+        "--strain-level" | "--strain") strain_level_flag="True"; shift 1;;
+        "--species-level" | "--species") species_level_flag="True"; shift 1;;
+        "--solver") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { solver="$2"; shift 2; };;
         "-m" | "--select") select_mode=$2; shift 2;;
         "--parallel-poa") parallel_poa=$2; shift 2;;
         "-ds" | "--designated_species") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { designated_species="$2"; shift 2; } ;;
@@ -214,7 +222,7 @@ while [[ "$1" != "" ]]; do
         "-S" | "--classified-out") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { read_aln="$2".gaf; shift 2; } ;;                                                                          
         "-R" | "--report") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pantax_report="$2".tsv; shift 2; } ;;
         "-o" | "--output") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { pantax_output=$2; shift 2; } ;;
-        "-gt") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { gurobi_threads=$2; shift 2; } ;;
+        "-gt") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { solver_threads=$2; shift 2; } ;;
         "--sample") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { sample=$2; shift 2; } ;;                                                             
 
         "--sample-test") sample_test=1; shift 1;;
@@ -333,7 +341,7 @@ if [ -z $tmp_dir ]; then
     tmp_dir=$(basename $pantax_db)_tmp
     tmp_dir=$(readlink -f $tmp_dir)
 elif [ ! -z $tmp_dir ] && [ -d $tmp_dir ]; then
-    tmp_dir=$tmp_dir/${pantax_db}_tmp
+    tmp_dir=$tmp_dir/$(basename $pantax_db)_tmp
 elif [ ! -z $tmp_dir ] && [ ! -d $tmp_dir ]; then
     :
 fi
@@ -635,12 +643,14 @@ else
     debug_flag=""
 fi
 
-if [ $save == "True" ] && [ $lz = false ] && [ $zstd = false ]; then
+if [ $save == "True" ] && [ $lz = false ] && [ $zstd = false ] && [ $h5 = false ]; then
     save_flag="--zip serialize"
-elif [ $save == "True" ] && [ $lz = true ] && [ $zstd = false ]; then
+elif [ $save == "True" ] && [ $lz = true ] && [ $zstd = false ] && [ $h5 = false ]; then
     save_flag="--zip lz"
-elif [ $save == "True" ] && [ $lz = false ] && [ $zstd = true ]; then
+elif [ $save == "True" ] && [ $lz = false ] && [ $zstd = true ] && [ $h5 = false ]; then
     save_flag="--zip zstd"
+elif [ $save == "True" ] && [ $lz = false ] && [ $zstd = false ] && [ $h5 = true ]; then
+    save_flag="--zip h5"
 else 
     save_flag=""
 fi
@@ -652,7 +662,11 @@ if [ $unique_trio_nodes_fraction == "None" ] || [ $unique_trio_nodes_count == "N
         if [[ $line_count -eq 1 && $unique_trio_nodes_fraction = "None" ]]; then
             unique_trio_nodes_fraction=0.43
         else
-            unique_trio_nodes_fraction=$default_unique_trio_nodes_fraction
+            if [ $short_reads == "True" ]; then
+                unique_trio_nodes_fraction=$default_short_unique_trio_nodes_fraction
+            elif [ $long_reads == "True" ]; then
+                unique_trio_nodes_fraction=$default_long_unique_trio_nodes_fraction
+            fi
         fi  
     fi 
     if [ $unique_trio_nodes_count == "None" ]; then
@@ -678,6 +692,10 @@ if [ $shift_unique_trio_nodes_fraction == "None" ]; then
     else
         shift_unique_trio_nodes_fraction=""
     fi
+elif [ $shift_unique_trio_nodes_fraction == "False" ] || [ $shift_unique_trio_nodes_fraction == "false" ]; then
+    shift_unique_trio_nodes_fraction=""
+elif [ $shift_unique_trio_nodes_fraction == "True" ] || [ $shift_unique_trio_nodes_fraction == "true" ]; then
+    shift_unique_trio_nodes_fraction="--shift"
 fi
 
 # profiling opt and cmd
@@ -697,7 +715,8 @@ pantaxr_opt="-d $pantax_db -w ./ -m gfa_mapped.gaf \
                 --mode $select_mode \
                 --full \
                 -o ./ \
-                --gthreads $gurobi_threads \
+                --solver $solver \
+                --gthreads $solver_threads \
                 -t $threads \
                 $shift_unique_trio_nodes_fraction $sample_test $save_flag $species_flag $strain_flag $debug_flag"
 $pantaxr profile $pantaxr_opt
