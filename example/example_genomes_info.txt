@@ -1,5 +1,5 @@
 genome_ID	strain_taxid	species_taxid	organism_name	id
 GCF_002012065.1_ASM201206v1	562.3	562	Escherichia coli	../genomes/GCF_002012065.1_ASM201206v1_genomic.fna
 GCF_024223415.1_ASM2422341v1	562.6	562	Escherichia coli	../genomes/GCF_024223415.1_ASM2422341v1_genomic.fna
-GCF_006400955.1_ASM640095v1	34.2	34	Myxococcus xanthus	../genomes/GCF_006400955.1_ASM640095v1_genomic.fna
-GCF_006401215.1_ASM640121v1	34.4	34	Myxococcus xanthus	../genomes/GCF_006401215.1_ASM640121v1_genomic.fna
+GCF_006400955.1	34.2	34	Myxococcus xanthus	../genomes/GCF_006400955.1_ASM640095v1_genomic.fna.gz
+MGYG000002538	34.4	34	Myxococcus xanthus	../genomes/MGYG000002538_genomic.fna

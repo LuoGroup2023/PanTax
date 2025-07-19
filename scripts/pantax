@@ -500,7 +500,7 @@ if [ $reconstruction_flag == "True" ]; then
         mv $tmp_dir/species_gfa reference_pangenome* species_range.txt $pantax_db
     fi
     if [ ! -f $pantax_db/species_genomes_stats.txt ]; then
-        $pantaxr stat -g $pantax_db/genomes_info.txt -t $threads -o $pantax_db/species_genomes_stats.txt
+        $pantaxr stat -g $pantax_db/genomes_info.txt -t $threads -o $pantax_db/species_genomes_stats.txt -w $wd
     fi
     echo "$(date "+%Y-%m-%d %H:%M:%S") - Building reference pangenome completely."
 else
@@ -517,7 +517,7 @@ if [ -f $script_dir/mark_pangenome_eq1.py ]; then
     fi
 fi
 if [ ! -f $pantax_db/species_genomes_stats.txt ]; then
-    $pantaxr stat -g $pantax_db/genomes_info.txt -t $threads -o $pantax_db/species_genomes_stats.txt
+    $pantaxr stat -g $pantax_db/genomes_info.txt -t $threads -o $pantax_db/species_genomes_stats.txt -w $wd
 fi 
 
 if [ $create_db == "True" ] && [ $create_index == "False" ];then

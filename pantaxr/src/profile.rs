@@ -2685,21 +2685,65 @@ fn abundance_est(args: &ProfileArgs, hap_metrics_vec: &[HapMetrics]) -> Result<(
         .with_separator(b'\t')
         .with_schema(Some(Arc::new(schema)))
         .finish()?;
+
+    let genomes_metadata = genomes_metadata
+        .with_columns([as_struct(vec![col("id")]).map(
+            |s| {
+                let ca = s.struct_()?;
+                let series_id = ca.field_by_name("id")?;
+                let chunked_id = series_id.str()?;
+                let out: StringChunked = chunked_id
+                    .into_iter()
+                    .map(|opt_id| {
+                        opt_id.and_then(|id| {
+                            Path::new(id)
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                        })
+                    })
+                    .collect();
+    
+                Ok(Some(out.into_column()))
+            },
+            GetOutput::from_type(DataType::String),
+        ).alias("file_stem")]);
+
     let selected_genomes_metadata = genomes_metadata
         .select([
             col("genome_ID"),
-            col("strain_taxid")
+            col("strain_taxid"),
+            col("file_stem")
         ])
         .with_columns([
-            col("genome_ID")
-                .str()
-                .split(lit("_"))
-                .list()
-                .slice(lit(0), lit(2))
-                .list()
-                .join(lit("_"), true)
-                .alias("hap_id")
+            when(col("file_stem").str().count_matches(lit("_"), false).gt_eq(lit(1)))
+            .then(
+                col("file_stem")
+                    .str()
+                    .split(lit("_"))
+                    .list()
+                    .slice(lit(0), lit(2))
+                    .list()
+                    .join(lit("_"), true)
+            )
+            .otherwise(col("file_stem"))
+            .alias("hap_id")
         ]);
+    
+    // let selected_genomes_metadata = genomes_metadata
+    //     .select([
+    //         col("genome_ID"),
+    //         col("strain_taxid")
+    //     ])
+    //     .with_columns([
+    //         col("genome_ID")
+    //             .str()
+    //             .split(lit("_"))
+    //             .list()
+    //             .slice(lit(0), lit(2))
+    //             .list()
+    //             .join(lit("_"), true)
+    //             .alias("hap_id")
+    //     ]);
     
     // let mut write_selected_genomes_metadata = selected_genomes_metadata.clone().collect()?;
     // save_output_to_file(&mut write_selected_genomes_metadata, "selected_genomes_metadata.txt", true)?;

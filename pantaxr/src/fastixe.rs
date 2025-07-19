@@ -107,7 +107,7 @@ fn parse_files(args: &FastixeArgs, input_genomes: &mut Vec<String>) {
 
 
 fn extract_prefix_from_path(file_path: &Path, regex: &str) -> Result<String, std::io::Error> {
-    let input_file_name = file_path.file_name()
+    let input_file_name = file_path.file_stem()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid file path"))?
         .to_string_lossy();
 
@@ -119,13 +119,16 @@ fn extract_prefix_from_path(file_path: &Path, regex: &str) -> Result<String, std
             let matched = caps.get(0).map(|m| m.as_str()).unwrap_or("");
             Ok(format!("{}#0#", matched))
         }
-        None => Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!(
-                "Filename '{}' doesn't match regex '{}'",
-                input_file_name, regex
-            ),
-        )),
+        // None => Err(std::io::Error::new(
+        //     std::io::ErrorKind::InvalidInput,
+        //     format!(
+        //         "Filename '{}' doesn't match regex '{}'",
+        //         input_file_name, regex
+        //     ),
+        // )),
+        None => {
+            Ok(format!("{}#0#", input_file_name))
+        }
     }
 }
 
