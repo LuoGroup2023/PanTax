@@ -131,12 +131,15 @@ class GenomesCluster:
         if not os.path.exists(f"{self.output_cluster}/{species_taxid}"):
             os.mkdir(f"{self.output_cluster}/{species_taxid}")
             species_cluster = list(set(species_cluster))
-            if self.m == -1: self.m = len(species_cluster)
-            if len(species_cluster) >= self.m:
+            if self.m == -1: 
+                max_m = len(species_cluster)
+            else:
+                max_m = self.m
+            if len(species_cluster) >= max_m:
                 genome_statics_data = self.genome_statics_data
                 strain_subset = genome_statics_data[genome_statics_data["bacteria"].isin(species_cluster)].reset_index()
                 strain_subset.sort_values(by='sca_N50', ascending=False, inplace=True)
-                strain_subset100 = strain_subset.iloc[0:self.m, [1]]["bacteria"].tolist()
+                strain_subset100 = strain_subset.iloc[0:max_m, [1]]["bacteria"].tolist()
                 if species_taxid in reference_or_respresentative_species_set and reference_or_respresentative_species_set[species_taxid] not in strain_subset:
                     strain_subset100.append(reference_or_respresentative_species_set[species_taxid])
                 species_cluster = strain_subset100
@@ -168,8 +171,11 @@ class GenomesCluster:
         failure_file = f"{self.output_cluster}/{species_taxid}/failure_file.txt"
         if not os.path.exists(failure_file):
             with open(failure_file, "w") as failure_f:
-                if self.n == -1: self.n = len(genome_data_set)
-                for bacteria_file in genome_data_set[:self.n]:
+                if self.n == -1: 
+                    max_n = len(genome_data_set)
+                else:
+                    max_n = self.n
+                for bacteria_file in genome_data_set[:max_n]:
                     bacteria_file = os.path.basename(bacteria_file)
                     source_path = os.path.join(source_dir, bacteria_file)
                     target_path = os.path.join(self.output_cluster, species_taxid, bacteria_file)
@@ -261,6 +267,7 @@ class GenomesCluster:
                             result_strains_set = clique
                             break
             # some special condition, the ANI of all strains(more than two strains) are lower than 95, it will filter 
+            # or two strains have ANI 100
             if len(result_strains_set) == 0:
                 if species_taxid in reference_or_respresentative_species_set:
                     refer_node = os.path.join(self.database, reference_or_respresentative_species_set[species_taxid])
@@ -274,8 +281,10 @@ class GenomesCluster:
                     subset_strains = genome_statics_data[genome_statics_data["bacteria"].isin(list_strains)]
                     max_value = subset_strains["sca_N50"].max()
                     better_strain = subset_strains[subset_strains["sca_N50"] == max_value]["bacteria"].values[0]
-                    result_strains_set.append(better_strain)  
-                rep_to_cluster[result_strains_set[0]] = result_strains_set[0]    
+                    result_strains_set.append(better_strain)
+                list_strains = [os.path.basename(i) for i in list(list_strains)]
+                list_strains.remove(result_strains_set[0])
+                rep_to_cluster[result_strains_set[0]] = list_strains
             self.generate_softlink_and_strain_file(result_strains_set, rep_to_cluster, species_taxid)  
 
     def parallel_cls(self, species_taxid):        

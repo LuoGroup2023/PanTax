@@ -50,12 +50,18 @@ def main():
         # genomes_path = [str(f) for f in Path(args.input_fasta).iterdir() if f.is_file()]
         genomes_path = get_genomes_info(args.summary_file_path, args.gtdb_metadata, args.output_dir, genomes_path, args.output_genomes_info, args.genome_assembly_lvl)
     elif args.custom_genomes and os.path.exists(args.custom_genomes):
+        if args.species_cluster:
+            species_clusters = args.species_cluster.strip().split(",")
+        else:
+            species_clusters = None
         genomes_path = []
         map_list = []
         with open(args.custom_genomes, "r") as f:
             next(f)
             for line in f:
                 origin_info = line.strip().split("\t")
+                if species_clusters and origin_info[2] not in species_clusters:
+                    continue
                 genomes_path.append(origin_info[4])
                 origin_info[4] = os.path.join(args.output_dir, os.path.basename(origin_info[4]))
                 map_list.append("\t".join(origin_info))
