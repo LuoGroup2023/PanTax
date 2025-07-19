@@ -88,7 +88,7 @@ fn print_stats_table(stats: &Stats) {
     println!("GC content (%):            {:.2}", stats.gc_content);
 }
 
-fn genome_metadata_stat(genome_metadata_file: PathBuf, species_len_output: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn genome_metadata_stat(wd: Option<PathBuf>, genome_metadata_file: PathBuf, species_len_output: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let schema = Schema::from_iter(vec![
         Field::new("genome_ID".into(), DataType::String),
         Field::new("strain_taxid".into(), DataType::String),
@@ -104,7 +104,23 @@ fn genome_metadata_stat(genome_metadata_file: PathBuf, species_len_output: &Path
         .finish()?
         .collect()?;
 
-    let genomes_path = genomes_metadata.column("id")?.str()?.into_no_null_iter().collect::<Vec<_>>();
+    // let genomes_path = genomes_metadata.column("id")?.str()?.into_no_null_iter().collect::<Vec<_>>();
+    let genomes_path = genomes_metadata
+        .column("id")?
+        .str()?
+        .into_no_null_iter()
+        .map(|path_str| {
+            let path = std::path::Path::new(path_str);
+            if path.is_relative() {
+                match &wd {
+                    Some(wd_path) => wd_path.join(path).to_path_buf(),
+                    None => panic!("Relative path {:?} provided but no --wd (working directory) specified.", path_str),
+                }
+            } else {
+                path.to_path_buf()
+            }
+        })
+        .collect::<Vec<PathBuf>>();
 
     let genomes_length: Vec<f64> = genomes_path
         .into_par_iter()
@@ -136,7 +152,7 @@ pub fn stat(args: StatArgs) -> Result<(), Box<dyn std::error::Error>> {
         let stats = stat_single_fasta(genome);
         print_stats_table(&stats);
     } else if let Some(genome_metadata_file) = args.genome_metadata_file {
-        genome_metadata_stat(genome_metadata_file, &args.output_name)?;
+        genome_metadata_stat(args.wd, genome_metadata_file, &args.output_name)?;
         info!("- Genomes statistics results written to {}.", args.output_name.to_string_lossy());
     } else if let Some(genome_filelist) = args.input_list {
         let paths: Vec<String> = fs::read_to_string(genome_filelist).unwrap().lines().map(|s| s.to_string()).collect();

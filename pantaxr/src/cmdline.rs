@@ -211,6 +211,9 @@ pub struct StatArgs {
     #[clap(short = 'g', long = "genome_info", help_heading = "INPUT FILE", help = "Input genome metadata.")]
     pub genome_metadata_file: Option<PathBuf>,
 
+    #[clap(short = 'w', long = "wd", help = "Working directory.")]
+    pub wd: Option<PathBuf>,
+
     #[clap(short = 't', long = "threads", default_value_t = 1, help = "Number of threads.")]
     pub threads: usize,
 
