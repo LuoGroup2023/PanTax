@@ -434,10 +434,15 @@ if [ $reconstruction_flag == "True" ]; then
         lz_flag=""
     fi 
     if [ $zstd = true ]; then
-        zstd_flag="--lz"
+        zstd_flag="--zstd"
     else
         zstd_flag=""
     fi 
+    if [ $save == "True" ] && [ $lz = false ] && [ $zstd = false ]; then
+        serialize_flag="--serialize"
+    else
+        serialize_flag=""
+    fi    
     python $script_dir/task_scheduling.py $gfa_build_dir $tmp_dir/species_pangenome $pantaxr $vg -t $threads -v $verbose -f $force -e $pangenome_building_tool -d $debug -p $parallel_build -g $save -o $tmp_dir/species_range.txt $lz_flag $zstd_flag
 
     # second step: build variation graph for the species with one genomes
@@ -447,7 +452,8 @@ if [ $reconstruction_flag == "True" ]; then
     fi
     if [ $save == "True" ]; then
         # cat $gfa_build_dir/gfa_build_done.txt | xargs -I {} -P $(($threads/2)) bash -c 'vg=$1; gfa_build_dir=$2; script_dir=$3; input=$4; name=$(basename $input .gfa); $vg convert -g $input -p > $gfa_build_dir/$name.vg; python $script_dir/get_h5_from_gfa.py $input $gfa_build_dir/$name.h5' _ $vg $gfa_build_dir $script_dir {}
-        cat $gfa_build_dir/gfa_build_done.txt | xargs -I {} -P $(($threads/2)) bash -c 'vg=$1; tmp_dir=$2; script_dir=$3; pantaxr=$4; input=$5; name=$(basename $input .gfa); $vg convert -g $input -p > $tmp_dir/gfa_build/$name.vg; $pantaxr zip -i $input -o $tmp_dir/gfa_build2/ -f $tmp_dir/species_range.txt' _ $vg $tmp_dir $script_dir $pantaxr {}
+        zip_options="$serialize_flag $lz_flag $serialize_flag"
+        cat $gfa_build_dir/gfa_build_done.txt | xargs -I {} -P $(($threads/2)) bash -c 'vg=$1; tmp_dir=$2; script_dir=$3; pantaxr=$4; zip_options=$5; input=$6; name=$(basename $input .gfa); $vg convert -g $input -p > $tmp_dir/gfa_build/$name.vg; $pantaxr zip -i $input -o $tmp_dir/gfa_build2/ -f $tmp_dir/species_range.txt $zip_options' _ $vg $tmp_dir $script_dir $pantaxr $zip_options {}
     elif [ $save == "False" ]; then
         cat $gfa_build_dir/gfa_build_done.txt | xargs -I {} -P $(($threads/2)) bash -c 'vg=$1; gfa_build_dir=$2; input=$3; name=$(basename $input .gfa); $vg convert -g $input -p > $gfa_build_dir/$name.vg' _ $vg $gfa_build_dir {}
     fi
