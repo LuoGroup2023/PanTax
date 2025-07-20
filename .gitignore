@@ -8,3 +8,4 @@ pantaxr/genomes
 pantaxr/Cargo.lock
 scripts/pantaxr
 tests
+pantax_conda

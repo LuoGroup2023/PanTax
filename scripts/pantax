@@ -77,6 +77,30 @@ function print_help() {
   exit 0
 }
 
+function help_test() {
+    if [[ $(which $0) == *conda* ]]; then
+        conda_run_flag="True"
+    else 
+        conda_run_flag="False"
+    fi
+    # set tools working path
+    script_path=$(readlink -f $0)
+    script_dir=$(dirname $script_path)
+    if [ $conda_run_flag == "True" ]; then
+        # tools_dir=$script_dir/tools
+        tools_dir=$script_dir
+        # fastix=$tools_dir/fastix
+    else
+        tools_dir=$(dirname $script_dir)/tools
+        # fastix=$tools_dir/fastix/bin/fastix
+    fi
+    pantaxr=$script_dir/pantaxr
+    
+    $pantaxr -h
+    $pantaxr profile -h
+    print_help
+}
+
 timestamp=$(date "+%Y-%m-%d %H:%M:%S")
 echo "$timestamp - $0 $@"
 
@@ -164,6 +188,7 @@ while [[ "$1" != "" ]]; do
         "--vg") [[ -z "$2" ]] && { echo "Error: $1 expects an argument"; exit 1; } || { vg="$2"; shift 2; } ;;
         "--debug") debug="True"; shift 1;;
         "--help" | "-h") print_help;;
+        "--ht") help_test;;
         "--version") echo $version; exit 0;;
 
         "--create") create_db="True"; shift 1;;
