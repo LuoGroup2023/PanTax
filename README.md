@@ -12,8 +12,8 @@
 ## Table of Contents
 
 + [Overview](#overview)
-+ [Installation](#installation)
 + [Installation (v2.0.0)](#installation-version-200)
++ [Gurobi license](#gurobi-license)
 + [Genome preprocessing](#genome-preprocessing)
 + [Running](#running)
 + [Options](#options)
@@ -27,93 +27,28 @@
 ---
 
 > [!IMPORTANT]
-> **Pantax v2.0.0 dev is released in the rust_dev branch.**
+> **Pantax v2.0.0 is released.**
 > 
-> The species and strain profiling module, the conversion of a single strain into a GFA module, the graph node and path information serialization and compression module, and the long read GAF filtering module are all rewritten using Rust. They are all integrated into the subcommand of `pantaxr`. It runs more than 25x faster in profiling.
+> The species and strain profiling module, the conversion of a single strain into a GFA module, the graph node and path information serialization and compression module, and the long read GAF filtering module are all rewritten using Rust. They are all integrated into the subcommand of `pantaxr`. It runs more than 25x faster in profiling. After fixing some major bugs and adjusting parameters, it is expected that the precision will be greatly improved and the recall will basically not change.
 
 ## Overview
 
 PanTax is a pangenome graph-based taxonomic profiling tool designed for accurate strain-level classification of metagenomic sequencing data. Unlike traditional methods that rely on multiple linear reference genomes, PanTax leverages pangenome graphs to better represent genetic variation and relationships across related genomes. It supports both short and long reads, works across single or multiple species, and delivers superior precision or recall at the strain level. PanTax provides a robust, scalable solution to taxonomic classification for strain resolution, overcoming key limitations of existing tools.
 
-## Installation
-The dependencies of PaxTax can generally be installed through conda. There are two dependencies that require special attention. 
+## Installation (Version 2.0.0)
 
-Firstly, PanTax relies on the [Gurobi Optimizer](https://www.gurobi.com/solutions/gurobi-optimizer/) Python package. While the package download is included in the environment.yaml file, a license must be obtained from the official website to use it for large model optimizations.
+Before installation, we explain here that the **Path Abundance Optimization (PAO)** of `PanTax` depends on the ILP solver. The `Gurobi` solver is the best choice, but it is a commercial ILP solver that requires a license. For academic researchers, they can apply for an academic license in `Gurobi`. We also support open source ILP solvers, such as `highs`, `cbc`, `glpk`. In the test, their best solution results are similar, but their speed is much slower than that of `Gurobi`.
 
-Secondly, the [pggb](https://github.com/pangenome/pggb.git) on Bioconda depends on a specific version of [vg](https://github.com/vgteam/vg.git) 1.59, preventing timely updates to the latest vg version. This implies that installing PanTax from Bioconda would face the same issue. Therefore, we recommend installing PanTax from the source. You need create a new environment with conda and installing latest vg, and then place it in the tools directory via a symbolic link or specify its path directly using the `--vg` option.
+If you need to use `Gurobi`, please be sure to refer to [Gurobi license](#gurobi-license) to obtain a license. If necessary, we will later release a version that does not rely on gurobi to build, which only allows other open source solvers.
 
 * **From bioconda**
-
 ```
-conda install -c bioconda -c conda-forge -c gurobi pantax gurobi 
+conda install -c bioconda -c conda-forge pantax 
+conda install -c gurobi gurobi=11
 
 ## Run pantax.
 pantax -h
 ```
-
-* **From source**
-```
-git clone https://github.com/LuoGroup2023/PanTax.git --recursive
-conda create -n pantax python=3.10
-conda activate pantax
-conda install -c bioconda -c conda-forge -c gurobi -c defaults \
-    r-base=4.2 \
-    samtools=1.19.2 \
-    bcftools=1.19 \
-    htslib=1.19.1 \
-    pggb \
-    vg \
-    graphaligner \
-    sylph \
-    h5py \
-    pandas \
-    tqdm \
-    numpy \
-    networkx \
-    pyarrow \
-    gurobi
-cd PanTax
-bash install.sh
-
-# If vg is not available, install with conda.(optional)
-conda create -n vg python=3.10
-conda activate vg
-conda install vg -c bioconda
-cd tools
-ln -fs $(which vg) ./
-
-# Run pantax
-cd ../scripts
-./pantax -h
-```
-
-* **From source (Version for conducting experiments)**
-
-> The version of the main tools we used in the paper's experiments are `pggb` 0.6.0, `vg` 1.52, `sylph` 0.6.1, `gurobipy` 11.0.2.
-
-```
-git clone https://github.com/LuoGroup2023/PanTax.git
-conda env create -f environment.yaml
-conda activate pantax_v12
-cd PanTax
-bash install.sh
-
-# If vg is not available, install with conda.(optional)
-conda create -n vg python=3.10
-conda activate vg
-conda install vg=1.52 -c bioconda
-cd tools
-ln -fs $(which vg) ./
-
-# Run pantax
-cd ../scripts
-chmod +x pantax pantax_utils data_preprocessing 
-./pantax -h
-```
-
-## Installation (Version 2.0.0)
-* **From bioconda**
-Bioconda installation is not supported for now.
 
 * **From source**
 ```
@@ -124,7 +59,7 @@ conda install -c bioconda -c conda-forge -c gurobi -c defaults \
     python=3.10 \
     r-base=4.2 \
     pggb=0.6.0 \
-    vg \
+    vg=1.59 \
     graphaligner=1.0.17 \
     sylph=0.6.1 \
     fastani=1.33 \
@@ -135,7 +70,9 @@ conda install -c bioconda -c conda-forge -c gurobi -c defaults \
     pyarrow \
     gurobi=11 \
     clang \
-    rust=1.82
+    rust=1.82 \
+    hdf5=1.10.5 \
+    glpk 
 cd PanTax
 bash install.sh v2
 
@@ -152,6 +89,46 @@ cd ../scripts
 ```
 If the installation environment encounters problems, you can also use `conda env create -f rust_dev.yaml -y` to build it.
 You may also choose not to specify the version of the tool, but the impact of using the latest version has not yet been tested.
+
+* **From docker**
+```
+cd docker
+
+docker build -t pantax:v1 .
+# 1. run directly in your path with data
+docker run -v $(dirname $PWD):/mnt -w /mnt/$(basename $PWD) pantax:v1 pantax -h
+# 2. start an interactive docker container session and run in your path with data
+docker run -it --rm -v $(dirname $PWD):/mnt -w /mnt/$(basename $PWD) -v /var/run/docker.sock:/var/run/docker.sock pantax:v1 /bin/bash
+conda activate pantax
+pantax -h
+```
+
+## Gurobi license
+
+Please refer to the following steps to install gurobi and obtain a license.
+
+1. Get Gurobi and the license
+
+Gurobi is a commercial ILP solver with two licensing options: (1) a single-host license where the license is tied to a single computer and (2) a network license for use in a compute cluster (using a license server in the cluster). Both options are freely and easily available for users in academia. [Download](https://www.gurobi.com/downloads/gurobi-software/) Gurobi for your specific platform. Note that the [grb](https://docs.rs/grb/latest/grb/) we use relies on **`Gurobi` version 11**.
+
+**To obtain your free academic license for Gurobi, please refer to the following resources:**
+
+* For an **Academic Named-User License**, visit: [https://www.gurobi.com/features/academic-named-user-license/](https://www.gurobi.com/features/academic-named-user-license/)
+* For an **Academic WLS (Web License Service) License**, visit: [https://www.gurobi.com/features/academic-wls-license/](https://www.gurobi.com/features/academic-wls-license/)
+* Alternatively, you can explore the available options and choose the license that best suits your needs at: [https://www.gurobi.com/academia/academic-program-and-licenses/](https://www.gurobi.com/academia/academic-program-and-licenses/)
+
+Here is an example of how to download Gurobi (no login required):
+```
+wget https://packages.gurobi.com/11.0/gurobi11.0.3_linux64.tar.gz
+```
+2. Set environment variable
+```
+export GUROBI_HOME="/path/to/gurobi1103/linux64"
+export PATH="${PATH}:${GUROBI_HOME}/bin"
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${GUROBI_HOME}/lib"
+export GRB_LICENSE_FILE=/path/to/gurobi.lic
+```
+The most important is is to set the environment variable `GRB_LICENSE_FILE`.
 
 ## Genome preprocessing
 
@@ -187,27 +164,37 @@ Due to the large size of the reference pangenome we used for testing, we provide
 1. species level and strain level 
 ```
 # long read
-pantax -f $genome_info -l -r $fq -db $db --species-level --strain-level
+pantax -f $genome_info -l -r $fq -db $db --species --strain
 # short read(pair-end)
-pantax -f $genome_info -s -p -r $fq -db $db --species-level --strain-level
+pantax -f $genome_info -s -p -r $fq -db $db --species --strain
 ```
 2. species level and then strain level
 ```
 # long read
 # species level 
-pantax -f $genome_info -l -r $fq -db $db --species-level -n
+pantax -f $genome_info -l -r $fq -db $db --species -n
 # strain level
-pantax -f $genome_info -l -r $fq -db $db --strain-level -n
+pantax -f $genome_info -l -r $fq -db $db --strain -n
 ```
 
 * **Fast query with specified database**
 ```
 # long read
-pantax -f $genome_info -l -r $fq -db $db --species-level --strain-level --fast
+pantax -f $genome_info -l -r $fq -db $db --species --strain --fast
 # short read(pair-end)
-pantax -f $genome_info -s -p -r $fq -db $db --species-level --strain-level --fast
+pantax -f $genome_info -s -p -r $fq -db $db --species --strain --fast
 ```
 
+* **Profiling with other solvers**
+```
+# default gurobi
+pantax -f $genome_info -s -p -r $fq -db $db --species --strain
+
+# use other open-source solvers with `--solver` option
+pantax -f $genome_info -s -p -r $fq -db $db --species --strain --solver highs
+pantax -f $genome_info -s -p -r $fq -db $db --species --strain --solver cbc
+pantax -f $genome_info -s -p -r $fq -db $db --species --strain --solver glpk
+```
 
 ## Options
 ```
@@ -247,11 +234,14 @@ Strain-level metagenomic profiling using pangenome graphs with PanTax
         -lt, --long-read-type str         Long read type (hifi, clr, ontr9, ontr10). Set precise-clipping based on read type.
         --precise-clipping float          clip the alignment ends with arg as the identity cutoff between correct / wrong alignments. (default: 0.66)
     Abundacnce calculation:
-        --species-level                   Species abundance calulation.
-        --strain-level                    Strain abundance calulation.
+        --species-level | --species       Species abundance calulation.
+        --strain-level | --strain         Strain abundance calulation.
+        --solver str                      MLP solver. (options: gurobi, cbc, glpk, highs. default: gurobi)
         -a float                          Species with relative abundance above the threshold are used for strain abundance estimation. (default: 0.0001)
-        -fr float                         The fraction of strain-specific triplet nodes covered by reads for one strain. The larger, the stricter. (default: multi species 0.3/ single species 0.43)
-        -fc float                         The divergence between first rough and second refined strain abundance estimates. The smaller, the stricter. (default: 0.46)
+        -fr float                         fstrain. The fraction of strain-specific triplet nodes covered by reads for one strain. The larger, the stricter.
+                                          (default: short 0.3/ long 0.5)
+        -fc float                         dstrain. The divergence between first rough and second refined strain abundance estimates. The smaller, the stricter.
+                                          (default: 0.46)
         -sh, --shift bool                 Shifting fraction of strain-specific triplet nodes. (multi-species: off, single-species: on)
         -sd float                         Coverage depth difference between the strain and its species, with only one strain. (default: 0.2)
         -sr float                         Rescued strain retention score. (default: 0.85)
@@ -342,7 +332,7 @@ conda install pantax -c bioconda -c conda-forge -c gurobi
 
 ## Change
 
-### Version: V2.0.0 dev (update at 2024-06-14)
+### Version: V2.0.0 (update at 2024-08-09)
 
 <details>
 <summary>Click here to check the log of all updates</summary>
@@ -398,10 +388,19 @@ conda install pantax -c bioconda -c conda-forge -c gurobi
 * *Fix bug: filter a few reads. The mapping of very few reads in GAF shows end > start, and only one node of these reads maps to the graph. <BR/>*
 * *The species and strain profiling module, the conversion of a single strain into a GFA module, the graph node and path information serialization and compression module, and the long read GAF filtering module are all rewritten using Rust. They are all integrated into the subcommand of pantaxr. It runs more than 25x faster in profiling. In general, the results will change slightly, with higher precision and lower recall. <BR/>*
 
-
+#### *__[Update - 2025 - 08 - 09]__* :  <BR/>
+*V2.0.0 <BR/>*
+* *The species and strain profiling module, the conversion of a single strain into a GFA module, the graph node and path information serialization and compression module, and the long read GAF filtering module and some other modules are all rewritten using Rust. They are all integrated into the subcommand of pantaxr. It runs more than 25x faster in profiling. In general, the results will change slightly, with higher precision and lower recall. <BR/>*
+* *Adjust the default fr parameter of long read from 0.3 to 0.5. <BR/>*
+* *Fix critical bug in trio node path parsing and unique trio node counting due to incorrect path orientation.<BR/>*
+* *Support open-source solvers (highs, cbc, glpk) with --solver option, but too slow for large MLP.<BR/>*
+* *Update data_preprocessing. When using -m -1 and -n -1, calculate and output the maximum number of non redundant genomes using all genomes of the species, and support retaining specified species from the genomes info file<BR/>*
+* *Non NCBI named genomes (GCF_ASM_genomic.fna) are preserved in their original form and support the use of relative path in genomes_info file. <BR/>*
+* *Add docker. <BR/>*
 
 ## TODO
 + Performance comparison between `vg giraffe` long read alignment and `Graphaligner` alignment.
++ Update `vg giraffe` command of new version `vg`. 
 
 ## Citation
 ```
