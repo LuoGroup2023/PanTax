@@ -55,9 +55,10 @@ function print_help() {
   echo "        -a float                          Species with relative abundance above the threshold are used for strain abundance estimation. (default: 0.0001)"
 #   echo "        -fr float                         Unique trio nodes fraction. (default: multi species 0.3/ single species 0.43)"
 #   echo "        -fc float                         Unique trio nodes mean count fraction (default: 0.46)."
-  echo "        -fr float                         The fraction of strain-specific triplet nodes covered by reads for one strain. The larger, the stricter." 
-  echo "                                          (default: short multi species 0.3/ short single species 0.43/ long multi species 0.5)"
-  echo "        -fc float                         The divergence between first rough and second refined strain abundance estimates. The smaller, the stricter. (default: 0.46)"
+  echo "        -fr float                         fstrain. The fraction of strain-specific triplet nodes covered by reads for one strain. The larger, the stricter." 
+  echo "                                          (default: short 0.3/ long 0.5)"
+  echo "        -fc float                         dstrain. The divergence between first rough and second refined strain abundance estimates. The smaller, the stricter."
+  echo "                                          (default: 0.46)"
   echo "        -sh, --shift bool                 Shifting fraction of strain-specific triplet nodes. (multi-species: off, single-species: on)"
   echo "        -sd float                         Coverage depth difference between the strain and its species, with only one strain. (default: 0.2)"
 #   echo "        -sr float                         Single species strain level coverage ratio. (default: 0.85)"
@@ -691,7 +692,12 @@ line_count=$(wc -l < $pantax_db/species_range.txt)
 if [ $unique_trio_nodes_fraction == "None" ] || [ $unique_trio_nodes_count == "None" ]; then
     if [ $unique_trio_nodes_fraction == "None" ]; then
         if [[ $line_count -eq 1 && $unique_trio_nodes_fraction = "None" ]]; then
-            unique_trio_nodes_fraction=0.43
+            # unique_trio_nodes_fraction=0.43
+            if [ $short_reads == "True" ]; then
+                unique_trio_nodes_fraction=$default_short_unique_trio_nodes_fraction
+            elif [ $long_reads == "True" ]; then
+                unique_trio_nodes_fraction=$default_long_unique_trio_nodes_fraction
+            fi
         else
             if [ $short_reads == "True" ]; then
                 unique_trio_nodes_fraction=$default_short_unique_trio_nodes_fraction

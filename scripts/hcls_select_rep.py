@@ -19,7 +19,7 @@ def filter_matrix(genomes_info_file, matrix_file, out_dir):
     # filter_matrix_file_path = matrix_file_dir / f"filter_{matrix_file_name}"
     filter_matrix_file_path = Path(out_dir) / f"filter_{matrix_file_name}"
 
-    if is_file_non_empty(filter_matrix_file_path):
+    if not is_file_non_empty(filter_matrix_file_path):
         genomes_id = pd.read_csv(genomes_info_file, sep="\t")["id"].tolist()
         strings = []
         idx = []
