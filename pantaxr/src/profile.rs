@@ -448,6 +448,7 @@ fn group_reads_by_species(df: &DataFrame) -> BTreeMap<String, Vec<Record>> {
         final_map
     } else {
         // fallback
+        warn!("Note that the read ID is duplicate, please check!");
         process_with_duplicates(records)
     }
 }
