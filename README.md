@@ -184,6 +184,7 @@ pantax -f $genome_info -l -r $fq -db $db --species --strain --fast
 # short read(pair-end)
 pantax -f $genome_info -s -p -r $fq -db $db --species --strain --fast
 ```
+In fast mode, PanTax uses ANI filtering based on Sylph query results. The default threshold is 99 and can be adjusted via `-A/--ani`. For high-quality datasets (NGS, PacBio HiFi, ONT R10), it is recommended to keep the default value of 99 to ensure high precision and recall. For noisy datasets (PacBio CLR, ONT R9), lowering the threshold to 85–90 may improve the recall of true strains, although precision could slightly decrease. Note that only a few genomes are typically filtered out at the default threshold; using a much lower threshold (85) may retain a large number of genomes, which can compromise the speed advantage of fast mode.
 
 * **Profiling with other solvers**
 ```
@@ -222,6 +223,7 @@ Strain-level metagenomic profiling using pangenome graphs with PanTax
         --force                           Force to rebuild pangenome.
         -e file                           Path to pangenome building tool executable file. (default: pggb)
         -A, --ani float                   ANI threshold for sylph query result filter. (default: 99)
+                                          recommended: 99 for high-quality datasets (NGS, PacBio HiFi, ONT R10); 85–90 for noisy datasets (PacBio CLR, ONT R9)
     Index construction(for vg giraffe):
         --index                           Create the index only.
         --best                            Best autoindex, which corresponds to vg autoindex. (only used with -s)
