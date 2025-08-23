@@ -23,6 +23,7 @@
 + [Change](#change)
 + [TODO](#todo)
 + [Citation](#citation)
++ [Patent](#patent-notice)
 
 ---
 
@@ -415,3 +416,9 @@ conda install pantax -c bioconda -c conda-forge -c gurobi
   publisher={Cold Spring Harbor Laboratory}
 }
 ```
+
+## Patent Notice
+
+We have a patent application (No. 2024110965476) related to this work.  
+For any commercial use, please contact the corresponding author for authorization: `xluo@hnu.edu.cn`
+
