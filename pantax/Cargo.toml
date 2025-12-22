@@ -1,0 +1,24 @@
+[package]
+name = "pantax"
+version = "2.0.1"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+chrono = "0.4.42"
+clap = { version = "4.5.35", features = ["derive"] }
+flexi_logger = "0.31.7"
+fxhash = "0.2.1"
+log = "0.4.29"
+needletail = "0.5.0"
+num_cpus = "1.17.0"
+rayon = "1.11.0"
+sylph = { git = "https://github.com/zwh82/sylph" }
+
+[[bin]]
+name = "sylph"
+path = "src/bin/sketch.rs"
+
+# for set panic hook
+[profile.release]
+panic = "abort"
