@@ -1,19 +1,47 @@
 [package]
 name = "pantax"
 version = "2.0.1"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+bincode = "1"
 anyhow = "1.0.100"
+async-trait = "0.1.89"
 chrono = "0.4.42"
+# cbc-src = { version = "*", features = ["cbcsolver", "parallel"] }
 clap = { version = "4.5.35", features = ["derive"] }
+coin_cbc = { version = "0", default-features = false }
+crossbeam-channel = "0.5.15"
+csv = "1.3.1"
+cpu-time = "1.0.0"
+dashmap = { version = "6.1.0", features = ["rayon"] }
 flexi_logger = "0.31.7"
+futures = "0.3.31"
 fxhash = "0.2.1"
+glpk-rust = { version = "0.1.0", optional = true }
+glpk-sys = { version = "0.2.0", optional = true }
+grb = { version = "3.0.1", features = ["gurobi11"] }
+highs = "1.11.0"
 log = "0.4.29"
 needletail = "0.5.0"
 num_cpus = "1.17.0"
 rayon = "1.11.0"
 sylph = { git = "https://github.com/zwh82/sylph" }
+tokio = { version = "1.48.0", features = ["process", "time", "sync", "rt", "macros", "rt-multi-thread", "fs", "io-util"] }
+socket2 = "0"
+which = "8.0.0"
+rust-htslib = { version = "0.49", default-features = false }
+regex = "1.12.2"
+rand = "0.9.1"
+glob = "0.3.3"
+fs2 = "0.4.3"
+lz4_flex = "0.11.3"
+nalgebra = "0.33.2"
+serde = { version = "1.0.219", features = ["derive"] }
+zstd = { version = "0.13.3", features = ["zstdmt"] }
+hdf5-metno = { version = "0.10.1", optional = true }
+polars = { version = "0.46.0", features = ["lazy", "dtype-struct", "is_in", "strings", "concat_str", "round_series"] }
+
 
 [[bin]]
 name = "sylph"
@@ -22,3 +50,10 @@ path = "src/bin/sketch.rs"
 # for set panic hook
 [profile.release]
 panic = "abort"
+
+[features]
+default = ["dev_test", "glpk"]
+dev_test = [] 
+glpk_rust = ["glpk-rust"]
+glpk = ["glpk-sys"]
+h5 = ["hdf5-metno"]

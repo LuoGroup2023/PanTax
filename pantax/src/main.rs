@@ -1,9 +1,15 @@
 
 
+
+use anyhow::Ok;
 use pantax::cli::Cli;
 use pantax::constants::*;
 use pantax::types::*;
 use pantax::construct;
+use pantax::index;
+use pantax::alignment;
+use pantax::profile;
+use pantax::utils::{init_global_config, get_config, GlobalConfig};
 use clap::Parser;
 use anyhow::Result;
 use flexi_logger::style;
@@ -11,20 +17,149 @@ use flexi_logger::{DeferredNow, Duplicate, FileSpec};
 use std::fs::File;
 use std::panic;
 use std::path::PathBuf;
-use std::fs::{create_dir_all, remove_dir_all};
+use std::fs::{create_dir_all, remove_dir_all, copy, rename};
 use chrono::Local;
 use std::io::{BufRead, BufReader};
-
 
 fn main() -> Result<()> {
     let mut args = Cli::parse();
     let data_type = initialize_setup(&mut args);
     install_panic_cleanup(&args);
-    let check_points = check(&args);
+    init_global_config(&args);
+    let global_config = get_config();
+    let check_points = check(&args, &global_config, &data_type);
     update_default_args(&mut args, &check_points);
     let mut genomes_metadata = read_genomes_info(args.genomes_info.as_ref().unwrap())?;
-    construct::construct(&mut genomes_metadata, &data_type, &check_points, &args)?;
+    if check_points.reconstruction {
+        copy(args.genomes_info.as_ref().unwrap(), args.db.join(GENOMES_INFO))?;
+        construct::construct(&mut genomes_metadata, &data_type, &check_points, &args, &global_config)?;
+    }
+    if check_points.need_index {
+        index::index(&args, &global_config)?;
+    }
+    if check_points.alignemnt {
+        alignment::alignemnt(&args, &global_config, &data_type)?;
+    }
+    if check_points.profiling {
+        let profiling_config = get_profiling_config(&mut args, &global_config)?;
+        profile::profile(profiling_config)?;
+    }
+    handle_res(&args, &global_config)?;
+    log::info!("PanTax Done.");
     Ok(())
+}
+
+fn handle_res(args: &Cli, global_config: &GlobalConfig) -> Result<()> {
+    let pwd = std::env::current_dir()?;
+    if args.species {
+        if args.pantax_output.is_some() {
+            let specie_abund_file = PathBuf::from(format!("{}_species_abundance.txt", args.pantax_output.as_ref().unwrap()));
+            copy(&global_config.species_abund_file, &specie_abund_file)?;
+        } else {
+            let specie_abund_file = pwd.join(&global_config.species_abund_file.file_name().unwrap());
+            copy(&global_config.species_abund_file, &specie_abund_file)?;
+        }
+    }
+    if args.strain {
+        if args.pantax_output.is_some() {
+            let strain_abund_file = PathBuf::from(format!("{}_strains_abundance.txt", args.pantax_output.as_ref().unwrap()));
+            copy(&global_config.strain_abund_file, &strain_abund_file)?;
+        } else {
+            let strain_abund_file = pwd.join(&global_config.strain_abund_file.file_name().unwrap());
+            copy(&global_config.strain_abund_file, &strain_abund_file)?;
+        }
+        if args.test {
+            let ori_strain_abund_file = pwd.join(&global_config.ori_strain_abund_file.file_name().unwrap());
+            copy(&global_config.ori_strain_abund_file, &ori_strain_abund_file)?;            
+        }
+    }
+    if (args.species && !args.next_for_strain) || (args.strain && args.next_for_strain) {
+        if let Some(read_aln) = &args.read_aln {
+            rename(&global_config.gfa_mapped, PathBuf::from(format!("{}.gaf", read_aln)))?;
+        }
+        if !args.debug {
+            if let Some(pantax_report) = &global_config.pantax_report {
+                if pantax_report.exists() {
+                    let dest_pantax_report = pwd.join(pantax_report.file_name().unwrap());
+                    rename(pantax_report, dest_pantax_report)?;
+                }
+            }
+            remove_dir_all(&args.tmp_dir)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn get_profiling_config(args: &mut Cli, global_config: &GlobalConfig) -> Result<ProfilingConfig> {
+    let range_file = File::open(&global_config.range_file_db)?;
+    let reader = BufReader::new(range_file);
+    let mut lines = reader.lines();
+    let is_single_species = lines.next().is_none();
+    if args.unique_trio_nodes_fraction.is_none() {
+        if args.short_read {
+            args.unique_trio_nodes_fraction = Some(0.3)
+        } else if args.long_read {
+            args.unique_trio_nodes_fraction = Some(0.5)
+        }
+    }
+    if args.unique_trio_nodes_count.is_none() {
+        args.unique_trio_nodes_count = Some(0.46)
+    }
+
+    let mut shift= false;
+    if args.shift.is_none() {
+        if is_single_species { shift = true }
+    } else if args.shift.is_some() {
+        if args.shift.as_ref().unwrap().to_lowercase() == "true".to_string() { shift = true }
+    }
+
+    let zip = if args.save {
+        Some("serialize".to_string())
+    } else if args.lz {
+        Some("lz".to_string())
+    } else if args.zstd {
+        Some("zstd".to_string())
+    } else {
+        None
+    };
+
+    let profiling_config = ProfilingConfig {
+        db: args.db.clone(),
+        wd: args.tmp_dir.clone(),
+        genomes_metadata: None,
+        range_file: None,
+        input_aln_file: Some(global_config.gfa_mapped.clone()),
+        species_len_file: None,
+        reads_binning_file: None,
+        species_abund_file: None,
+        out_binning_file: global_config.pantax_report.clone(),
+        min_species_abundance: args.min_species_abundance,
+        unique_trio_nodes_fraction: args.unique_trio_nodes_fraction.unwrap(),
+        unique_trio_nodes_mean_count_f: args.unique_trio_nodes_count.unwrap(),
+        single_cov_ratio: args.single_cov_ratio,
+        single_cov_diff: args.single_cov_diff,
+        minimization_min_cov: 0.,
+        min_cov: args.min_cov,
+        min_depth: args.min_depth,
+        species: args.species,
+        strain: args.strain,
+        output_dir: args.tmp_dir.clone(),
+        filtered: !args.no_filter,
+        sample_nodes: args.sample_nodes,
+        designated_species: args.designated_species.clone(),
+        mode: if args.mode.is_some() { args.mode } else { Some(2) },
+        full: true,
+        solver: args.solver.clone(),
+        gurobi_threads: args.gurobi_threads,
+        shift,
+        sample_test: args.sample_test,
+        zip,
+        force: args.force,
+        trace: false,
+        debug: args.debug,
+    };
+    Ok(profiling_config)
 }
 
 fn read_genomes_info(genomes_info_path: &PathBuf) -> Result<Vec<GenomesInfo>> {
@@ -49,9 +184,9 @@ fn read_genomes_info(genomes_info_path: &PathBuf) -> Result<Vec<GenomesInfo>> {
 
 
 
-fn check(args: &Cli) -> CheckPoints {
+fn check(args: &Cli, global_config: &GlobalConfig, data_type: &DataType) -> CheckPoints {
     let mut checkpoints = CheckPoints::default();
-    let reference_pangenome_gfa = args.db.join(REFERENCE_PANGENOME_GFA);
+    let reference_pangenome_gfa = &global_config.reference_pangenome_gfa_db;
     if !reference_pangenome_gfa.is_file() {
         checkpoints.reconstruction = true;
     } else if reference_pangenome_gfa.is_file() && args.create {
@@ -64,6 +199,23 @@ fn check(args: &Cli) -> CheckPoints {
 
     if args.query_and_filter {
         checkpoints.fast_query_and_filter = true
+    }
+
+    if (args.index || data_type.needs_index()) && !&global_config.index_files[2].exists() {
+        checkpoints.need_index = true;
+    }
+
+    if !args.create && !args.index && !args.query_and_filter {
+        if !args.species && !args.strain {
+            eprintln!("No species or strain option specified. Please set --species or --strain.");
+            std::process::exit(1);
+        }
+        if !&global_config.gfa_mapped.exists() {
+            checkpoints.alignemnt = true
+        }
+        if args.species || args.strain {
+            checkpoints.profiling = true
+        }
     }
 
     checkpoints
@@ -118,8 +270,6 @@ fn my_own_format(
 
 
 fn initialize_setup(args: &mut Cli) -> DataType {
-    
-
     let log_spec = format!("{}", args.log_level_filter().to_string());
     let filespec = FileSpec::default()
         .basename("pantax")
@@ -134,15 +284,23 @@ fn initialize_setup(args: &mut Cli) -> DataType {
         .start()
         .expect("Something went wrong with creating log file");   
 
-    if args.read_files.is_none() && !args.index {
+    // check tools
+    // TODO: need detail error output
+    args.vg = which::which(args.vg.clone()).unwrap();
+    args.pangenome_building_exe = which::which(args.pangenome_building_exe.clone()).unwrap();
+    args.lr_aligner = which::which(args.lr_aligner.clone()).unwrap();
+
+    if args.read_files.is_none() && !args.index && !args.create {
         eprintln!("read_files need to provided except only create index");
         std::process::exit(1);
     }
 
-    for file in args.read_files.as_ref().unwrap() {
-        if !file.exists() {
-            eprintln!("Input file does not exist: {:?}", file);
-            std::process::exit(1);
+    if !args.create && !args.index {
+        for file in args.read_files.as_ref().unwrap() {
+            if !file.exists() {
+                eprintln!("Input file does not exist: {:?}", file);
+                std::process::exit(1);
+            }
         }
     }
 
@@ -151,11 +309,11 @@ fn initialize_setup(args: &mut Cli) -> DataType {
     if args.short_read && args.long_read {
         eprintln!("Cannot specify both -s and -l");
         std::process::exit(1);
-    } else if !args.short_read && !args.long_read {
+    } else if !args.short_read && !args.long_read && !args.index && !args.fast_query {
         eprintln!("Should specify either -s or -l");
         std::process::exit(1);        
     }
-       
+
     let mode = if args.long_read {
         if args.paired {
             eprintln!("ERROR [pantax] Long read mode cannot be paired (-l conflicts with -p)");
@@ -166,7 +324,7 @@ fn initialize_setup(args: &mut Cli) -> DataType {
             std::process::exit(1);
         }
         DataType::LongReadSingle
-    } else {
+    } else if args.short_read {
         if args.paired {
             if file_count == 2 {
                 DataType::ShortReadPaired
@@ -183,10 +341,14 @@ fn initialize_setup(args: &mut Cli) -> DataType {
             }
             DataType::ShortReadSingle
         }
+    } else if args.index || (args.create && !args.fast_query) {
+        // not important, for only create or index
+        DataType::ShortReadSingle
+    } else {
+        eprintln!("No read file.");
+        std::process::exit(1);
     };
         
-
-
     // genomes_info
     if let Some(genomes_info) = &args.genomes_info {
         if !genomes_info.exists() {
@@ -211,8 +373,6 @@ fn initialize_setup(args: &mut Cli) -> DataType {
     } 
     create_dir_all(&args.tmp_dir)
         .unwrap_or_else(|e| panic!("Failed to create directory {:?}: {}", &args.tmp_dir, e));
-
-    
 
     mode
 }
