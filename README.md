@@ -419,6 +419,6 @@ conda install pantax -c bioconda -c conda-forge -c gurobi
 
 ## Patent Notice
 
-We have a patent application (No. 2024110965476) related to this work.  
+This software is protected by a granted Chinese Patent (Patent No. **ZL 2024 1 1096547.6**).
 For any commercial use, please contact the corresponding author for authorization: `xluo@hnu.edu.cn`
 
