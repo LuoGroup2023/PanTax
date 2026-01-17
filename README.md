@@ -8,6 +8,8 @@
 [![GitHub forks](https://img.shields.io/github/forks/LuoGroup2023/PanTax?color=lightblue&label=fork)](https://github.com/LuoGroup2023/PanTax/network/members) 
 <!-- [![visitors](https://visitor-badge.laobi.icu/badge?page_id=LuoGroup2023.PanTax)](https://github.com/LuoGroup2023/PanTax) -->
 
+Read more about PanTax here:
+> [Strain-level metagenomic profiling using pangenome graphs with PanTax](https://genome.cshlp.org/content/early/2026/01/13/gr.280858.125)
 
 ## Table of Contents
 
@@ -407,13 +409,12 @@ conda install pantax -c bioconda -c conda-forge -c gurobi
 
 ## Citation
 ```
-@article{luo2025strain,
+@article{zhang2026strain,
   title={Strain-level metagenomic profiling using pangenome graphs with PanTax},
-  author={Luo, Xiao and Zhang, Wenhai and Liu, Yuansheng and Li, Guangyi and Xu, Jialu and Chen, Enlian and Schonhuth, Alexander},
-  journal={bioRxiv},
-  pages={2025--04},
-  year={2025},
-  publisher={Cold Spring Harbor Laboratory}
+  author={Zhang, Wenhai and Liu, Yuansheng and Li, Guangyi and Xu, Jialu and Chen, Enlian and Sch{\"o}nhuth, Alexander and Luo, Xiao},
+  journal={Genome Research},
+  year={2026},
+  publisher={Cold Spring Harbor Lab}
 }
 ```
 
