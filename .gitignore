@@ -4,9 +4,15 @@ tools/gurobipy-11.0.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
 synchronous.sh
 pantaxr/tests
 pantaxr/target
+pantaxr/target2
 pantaxr/genomes
+pantaxr/exe
 pantaxr/Cargo.lock
+pantaxr/gurobi.log
 scripts/pantaxr
 tests
 pantax_conda
 docker_local
+pantax/target
+pantax/test
+.vscode

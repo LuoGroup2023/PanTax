@@ -19,7 +19,9 @@ def filter_genomes(sylph_result, genome2seqid, genomes_info, ani_threshold, out_
     sylph_result["seq_id"] = sylph_result["Contig_name"].str.split(" ").str[0]
     sylph_result = sylph_result[sylph_result["Adjusted_ANI"] >= int(ani_threshold)]
     merge_df = pd.merge(sylph_result, genome2seqid, on="seq_id", how="left")
-    sylph_genomes = merge_df[["genome_ID"]]    
+    sylph_genomes = merge_df[["genome_ID"]].drop_duplicates()    
+    # maybe have duplicated genomes, but not found, do not why.
+    # I have apply drop_duplicates in sylph_genomes
     filter_genomes_info = pd.merge(genomes_info, sylph_genomes, on="genome_ID")
     filter_genomes_info.to_csv(f"{out_dir}/filter_genomes_info.txt", sep="\t", index=False)
 
