@@ -10,7 +10,7 @@ async-trait = "0.1.89"
 chrono = "0.4.42"
 # cbc-src = { version = "*", features = ["cbcsolver", "parallel"] }
 clap = { version = "4.5.35", features = ["derive"] }
-coin_cbc = { version = "0", default-features = false }
+coin_cbc = { version = "0", default-features = false, optional = true  }
 crossbeam-channel = "0.5.15"
 csv = "1.3.1"
 cpu-time = "1.0.0"
@@ -20,8 +20,8 @@ futures = "0.3.31"
 fxhash = "0.2.1"
 glpk-rust = { version = "0.1.0", optional = true }
 glpk-sys = { version = "0.2.0", optional = true }
-grb = { version = "3.0.1", features = ["gurobi11"] }
-highs = "1.11.0"
+grb = { version = "3.0.1", features = ["gurobi11"], optional = true  }
+highs = { version = "1.11.0", optional = true }
 log = "0.4.29"
 needletail = "0.5.0"
 num_cpus = "1.17.0"
@@ -41,19 +41,37 @@ serde = { version = "1.0.219", features = ["derive"] }
 zstd = { version = "0.13.3", features = ["zstdmt"] }
 hdf5-metno = { version = "0.10.1", optional = true }
 polars = { version = "0.46.0", features = ["lazy", "dtype-struct", "is_in", "strings", "concat_str", "round_series"] }
+cplex-rs = { version = "0.1.9", optional = true }
 
 
 [[bin]]
 name = "sylph"
 path = "src/bin/sketch.rs"
 
+[[bin]]
+name = "pantax-gb"
+path = "src/bin/pantax_gb.rs"
+
+[[bin]]
+name = "pantax-free"
+path = "src/bin/pantax_free.rs"
+
+[[bin]]
+name = "pantax-cp"
+path = "src/bin/pantax_cp.rs"
+
 # for set panic hook
 [profile.release]
 panic = "abort"
 
 [features]
-default = ["dev_test", "glpk"]
+default = ["dev_test", "glpk", "hs", "cbc", "gb", "cp"]
+free = ["glpk", "hs", "cbc"]
 dev_test = [] 
 glpk_rust = ["glpk-rust"]
 glpk = ["glpk-sys"]
 h5 = ["hdf5-metno"]
+hs = ["highs"]
+cbc = ["coin_cbc"]
+gb = ["grb"]
+cp = ["cplex-rs"]

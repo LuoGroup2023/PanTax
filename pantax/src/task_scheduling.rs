@@ -213,7 +213,7 @@ enum TaskType {
 #[derive(Debug, Clone)]
 enum PangenomeTool {
     Pggb,
-    CactusPangenome { reference: Option<PathBuf> },
+    CactusPangenome,
 }
 
 impl TaskScheduler {
@@ -325,8 +325,8 @@ impl TaskScheduler {
             let pangenome_tool = if exe_name.contains("pggb") {
                 PangenomeTool::Pggb
             } else if exe_name.contains("cactus-pangenome") {
-                let reference = self.species2reference.get(species_taxid.as_str()).cloned();
-                PangenomeTool::CactusPangenome { reference }
+                // let reference = self.species2reference.get(species_taxid.as_str()).cloned();
+                PangenomeTool::CactusPangenome
             } else {
                 return Err(anyhow!("Unsupported pangenome tool: {}", exe_name));
             };  
@@ -395,7 +395,7 @@ impl TaskScheduler {
             PangenomeTool::Pggb => {
                 self.execute_pggb(species_taxid, threads, genomes_num).await
             }
-            PangenomeTool::CactusPangenome { reference } => {
+            PangenomeTool::CactusPangenome => {
                 self.execute_cactus_pangenome(species_taxid, threads).await
             }
         }

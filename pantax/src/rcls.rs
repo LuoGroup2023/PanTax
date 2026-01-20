@@ -120,6 +120,7 @@ pub fn load_gaf_file_lazy(file_path: &PathBuf) -> PolarsResult<DataFrame> {
     let gaf_df = LazyCsvReader::new(file_path.clone())
         .with_has_header(false)
         .with_separator(b'\t')
+        .with_comment_prefix(Some("@".into()))
         .with_null_values(Some(NullValues::AllColumnsSingle("*".into())))
         .with_quote_char(None)
         .finish()?;

@@ -2,6 +2,21 @@ pub const TS_DASHES_BLANK_COLONS_DOT_BLANK: &str = "%Y-%m-%d %H:%M:%S%.3f";
 pub const GENOMES_INFO: &str = "genomes_info.txt";
 pub const CHUNK_SIZE: usize = 1024;
 
+#[cfg(feature = "gb")]
+pub const DEFAULT_SOLVER: &str = "gurobi";
+
+#[cfg(feature = "cp")]
+pub const DEFAULT_SOLVER: &str = "cplex";
+
+#[cfg(feature = "glpk")]
+pub const DEFAULT_SOLVER: &str = "glpk";
+
+#[cfg(feature = "hs")]
+pub const DEFAULT_SOLVER: &str = "highs";
+
+#[cfg(feature = "free")]
+pub const DEFAULT_SOLVER: &str = "highs";
+
 // glpk
 // https://github.com/firedrakeproject/glpk/blob/master/src/glpk.h
 pub const GLP_MIN: i32 = 1;

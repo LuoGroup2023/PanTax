@@ -3,6 +3,7 @@ use crate::rcls;
 use rcls::{save_output_to_file, load_gaf_file_lazy};
 use crate::zip::{load_from_zip_graph, CompressType};
 use crate::types::Graph;
+#[allow(unused_imports)]
 use crate::error::*;
 use crate::types::ProfilingConfig;
 use log::*;
@@ -16,25 +17,44 @@ use polars::functions::concat_df_horizontal;
 use std::fs::{File, create_dir_all};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 use std::time::Instant;
 use std::io::{BufRead, BufReader};
 
 use cpu_time::ProcessTime;
 use dashmap::DashMap;
-
-use grb::prelude::*;
-use grb::expr::LinExpr;
-
-use coin_cbc::{Model as CbcModel, Sense};
-
-use nalgebra::{DMatrix, RowDVector};
+use fxhash::{FxHashMap, FxHashSet};
 
 use rand::{SeedableRng, rngs::StdRng, seq::IndexedRandom};
-
+use nalgebra::{DMatrix, RowDVector};
 // use bincode::{Encode, Decode};
 // use std::io::{BufWriter, Write}; 
 use anyhow::Result;
+
+#[cfg(feature = "gb")]
+use grb::prelude::*;
+#[cfg(feature = "gb")]
+use grb::expr::LinExpr;
+
+#[cfg(feature = "cbc")]
+use coin_cbc::{Model as CbcModel, Sense};
+
+#[cfg(feature = "hs")]
+use highs::{HighsModelStatus, RowProblem, Sense as HighsSense};
+
+#[cfg(feature = "glpk_rust")]
+use glpk_rust::*;
+#[cfg(feature = "glpk")]
+use glpk_sys::{
+    glp_create_prob, glp_set_prob_name, glp_set_obj_dir, glp_add_cols, glp_set_col_name,
+    glp_set_col_bnds, glp_set_obj_coef, glp_set_col_kind, glp_add_rows, glp_set_row_name,
+    glp_set_row_bnds, glp_load_matrix, glp_mip_col_val, glp_delete_prob, glp_init_iocp, glp_intopt,
+    glp_get_obj_val, glp_term_out
+};
+#[cfg(feature = "glpk")]
+use std::ffi::CString;
+#[cfg(feature = "glpk")]
+use crate::constants::*;
 
 #[derive(Debug, Default, Clone)]
 pub struct InputFile {
@@ -346,7 +366,7 @@ fn dataframe_to_records_and_check_unique(df: &DataFrame) -> (Vec<Record>, bool) 
     let read_end_series = df.column("read_end").unwrap().i64().unwrap();
     let species_series = df.column("species").unwrap().str().unwrap();
 
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
     let mut unique = true;
 
     let mut records = Vec::with_capacity(df.height());
@@ -384,7 +404,7 @@ fn dataframe_to_records_and_check_unique(df: &DataFrame) -> (Vec<Record>, bool) 
 }
 
 fn process_with_duplicates(records: Vec<Record>) -> BTreeMap<String, Vec<Record>> {
-    let mut grouped: HashMap<String, Vec<Record>> = HashMap::new();
+    let mut grouped: FxHashMap<String, Vec<Record>> = FxHashMap::default();
     for r in records {
         grouped.entry(r.read_id.clone()).or_default().push(r);
     }
@@ -392,7 +412,7 @@ fn process_with_duplicates(records: Vec<Record>) -> BTreeMap<String, Vec<Record>
     let mut species_map: BTreeMap<String, Vec<Record>> = BTreeMap::new();
 
     for (_read_id, group) in grouped.into_iter() {
-        let species_set: HashSet<_> = group.iter().map(|r| &r.species).collect();
+        let species_set: FxHashSet<_> = group.iter().map(|r| &r.species).collect();
         if species_set.len() == 1 {
             let species = group[0].species.clone();
             let entry = species_map.entry(species.clone()).or_default();
@@ -635,9 +655,9 @@ fn load_species_range(args: &ProfilingConfig, input_file: &InputFile, species_pr
     
 }
 
-fn trio_nodes_info(graph: &Graph) -> (HashMap<(usize, usize, usize), usize>, Vec<i64>, DMatrix<u8>) {
-    let mut trio_nodes_set = HashSet::new();
-    let mut hap_trio_paths = HashMap::new();
+fn trio_nodes_info(graph: &Graph) -> (FxHashMap<(usize, usize, usize), usize>, Vec<i64>, DMatrix<u8>) {
+    let mut trio_nodes_set = FxHashSet::default();
+    let mut hap_trio_paths = FxHashMap::default();
     let haps: Vec<String> = graph.paths.keys().cloned().collect();
     
     // println!("haps: {:?}", haps);
@@ -662,7 +682,7 @@ fn trio_nodes_info(graph: &Graph) -> (HashMap<(usize, usize, usize), usize>, Vec
     }
 
     let trio_nodes: Vec<(usize, usize, usize)> = trio_nodes_set.into_iter().collect();
-    let trio_index_map: HashMap<_, _> = trio_nodes.iter().enumerate().map(|(i, t)| (*t, i)).collect();
+    let trio_index_map: FxHashMap<_, _> = trio_nodes.iter().enumerate().map(|(i, t)| (*t, i)).collect();
     let mut presence_matrix = DMatrix::zeros(trio_nodes.len(), graph.paths.len());
 
     let mut count_per_trio = vec![0; trio_nodes.len()];
@@ -682,7 +702,7 @@ fn trio_nodes_info(graph: &Graph) -> (HashMap<(usize, usize, usize), usize>, Vec
     }
 
     // save unique trio nodes
-    let mut unique_trio_nodes = HashMap::new();
+    let mut unique_trio_nodes = FxHashMap::default();
     let mut unique_lengths = Vec::new();
     let mut rows = Vec::new();
     for (i, count) in count_per_trio.iter().enumerate() {
@@ -723,7 +743,7 @@ fn trio_nodes_info(graph: &Graph) -> (HashMap<(usize, usize, usize), usize>, Vec
 fn get_node_abundances(
     otu: &String,
     nodes_len: &Vec<i64>,
-    trio_nodes: &HashMap<(usize, usize, usize), usize>,
+    trio_nodes: &FxHashMap<(usize, usize, usize), usize>,
     trio_nodes_len: &Vec<i64>,
     start: usize,
     reads_cluster: &[Record],
@@ -779,8 +799,8 @@ fn get_node_abundances(
         let end_node = *read_nodes.last().unwrap();
         let mut target_len = read.read_end - read.read_start;
         let mut seen = 0;
-        let mut read_nodes_len: HashMap<usize, i64> = HashMap::new();
-        let mut undup_read_nodes = HashSet::new();
+        let mut read_nodes_len: FxHashMap<usize, i64> = FxHashMap::default();
+        let mut undup_read_nodes = FxHashSet::default();
 
         // Set the initial base coverage of the node to 0    
         for &node in &read_nodes {
@@ -1099,7 +1119,7 @@ fn first_filter_paths(
             if trio_idxs_len == 0 { continue; }
 
             // Obtain the abundance of the unique trio node for this path
-            let trio_idx_set: std::collections::HashSet<usize> = trio_idxs.iter().cloned().collect();
+            let trio_idx_set: FxHashSet<usize> = trio_idxs.iter().cloned().collect();
             let abundances: Vec<f64> = trio_node_abundances
                 .iter()
                 .enumerate()
@@ -1274,6 +1294,7 @@ fn sample_sorted(vec: &Vec<usize>, sample_size: usize, seed: u64) -> Vec<usize> 
     sampled
 }
 
+#[cfg(feature = "gb")]
 fn gurobi_opt(
     gurobi_opt_var: &mut GurobiOptVar,
     nvert: usize,
@@ -1296,7 +1317,7 @@ fn gurobi_opt(
         .iter()             
         .copied()  
         .fold(f64::NEG_INFINITY, f64::max);
-    let mut var_map = HashMap::new();
+    let mut var_map = FxHashMap::default();
     let mut x_vec = Vec::new();
     for i in 0..npaths {
         let var = add_var!(
@@ -1340,7 +1361,7 @@ fn gurobi_opt(
     }
 
     if npaths > 0 {
-        let mut x_binary_var_map = HashMap::new();
+        let mut x_binary_var_map = FxHashMap::default();
         let mut sum_x_binary = LinExpr::new();
         for i in 0..npaths {
             let var = add_var!(
@@ -1489,7 +1510,413 @@ fn gurobi_opt(
     Ok(())
 }
 
+#[cfg(feature = "cp")]
+fn cplex_opt(
+    gurobi_opt_var: &mut GurobiOptVar,
+    nvert: usize,
+    paths: &BTreeMap<String, Vec<usize>>,
+    node_abundance_vec: &Vec<f64>,
+    node_base_cov: &Vec<usize>,
+    node_len: &Vec<i64>,
+    args: &ProfilingConfig,
+) -> Result<(), cplex_rs::Error> {
+    use cplex_rs::*;
+    let mut env = Environment::new()?;
+    env.set_parameter(cplex_rs::parameters::Threads(args.gurobi_threads as u32))?;
 
+    let mut problem  = Problem::new(env, "lp")?;
+
+    let npaths = gurobi_opt_var.possible_paths_idx.len();
+    
+    let max_val = node_abundance_vec
+        .iter()             
+        .copied()  
+        .fold(f64::NEG_INFINITY, f64::max);
+    
+    let mut var_map = FxHashMap::default();
+    for i in 0..npaths {
+        let var_name = format!("x{}", i);
+        let var = problem.add_variable(
+            Variable::new(
+                VariableType::Continuous,
+                0.0,             
+                0.0,        
+                1.05 * max_val,   
+                &var_name
+            )
+        )?;
+        var_map.insert(i, var);
+    }
+
+    let mut coeff_matrix = DMatrix::<f32>::zeros(nvert, npaths);
+    for (i, path) in paths.values().enumerate() {
+        if let Some(pos_idx) = gurobi_opt_var.possible_paths_idx.iter().position(|&x| x == i) {
+            for &v in path.iter() {
+                // assert!(v < nvert, "Node index {} exceeds nvert {}", v, nvert);
+                // assert!(i < npaths, "Path index {} exceeds npaths {}, {:?}", i, npaths, gurobi_opt_var.possible_paths_idx);
+                coeff_matrix[(v, pos_idx)] = 1.0; 
+            }
+        }
+    }
+
+    let node_cov_matrix = RowDVector::<f32>::from_iterator(
+        nvert,
+        node_base_cov.iter().map(|&x| x as f32)
+    );
+    //1 × nvert  @  nvert × npaths  = 1 × npaths
+    let path_cov = node_cov_matrix * &coeff_matrix;
+
+    let node_len_matrix = RowDVector::<f32>::from_iterator(
+        nvert,
+        node_len.iter().map(|&x| x as f32)
+    );
+    //1 × nvert  @  nvert × npaths  = 1 × npaths
+    let path_len = node_len_matrix * &coeff_matrix;
+    let path_ratio: nalgebra::Matrix<f32, nalgebra::Const<1>, nalgebra::Dyn, nalgebra::VecStorage<f32, nalgebra::Const<1>, nalgebra::Dyn>> = path_cov.component_div(&path_len);
+
+    for (i, ratio) in path_ratio.iter().enumerate() {
+        gurobi_opt_var.hap_metrics[gurobi_opt_var.possible_paths_idx[i]].path_cov_ratio = Some(*ratio as f64);
+    }
+
+    let mut x_binary_var_map = FxHashMap::default();
+    if npaths > 0 {
+        let mut sum_x_binary_vars = Vec::new();
+        for i in 0..npaths {
+            let var_name = format!("strain_indicator_{}", i);
+            let bin_var = problem.add_variable(
+                cplex_rs::Variable::new(
+                    VariableType::Binary,
+                    0.0,
+                    0.0,
+                    1.0,
+                    &var_name
+                )
+            )?;
+            x_binary_var_map.insert(i, bin_var);
+            sum_x_binary_vars.push((bin_var, 1.0));
+            
+            // constraint: var >= (x - min_cov) * (1/(2*max_val))
+            // is equal to 2*max_val*var >= x - min_cov
+            // convert：x - 2*max_val*var <= min_cov
+            let x_var = var_map[&i];
+            let coeffs = vec![
+                (x_var, 1.0),
+                (bin_var, -2.0 * max_val)
+            ];
+            problem.add_constraint(
+                cplex_rs::Constraint::new(
+                    ConstraintType::LessThanEq,
+                    args.minimization_min_cov,
+                    None,
+                    coeffs
+                )
+            )?;
+        }
+
+        problem.add_constraint(
+            cplex_rs::Constraint::new(
+                ConstraintType::LessThanEq,
+                npaths as f64,
+                None,
+                sum_x_binary_vars
+            )
+        )?;
+    }
+
+    let valid_nodes: Vec<usize> = node_abundance_vec
+        .iter()
+        .enumerate()
+        .filter(|&(_v, &ab)| ab > 0.0)
+        .map(|(v, _)| v)
+        .collect();
+
+    let sample_valid_nodes = if args.sample_test {
+        if valid_nodes.len() > 500 {
+            debug!("\tFor {} species graph, subsample 500 nodes for test.", gurobi_opt_var.otu);
+            sample_sorted(&valid_nodes, 500, 42)
+        } else {
+            valid_nodes
+        }
+    } else if !args.sample_test && args.sample_nodes > 0 {
+        if valid_nodes.len() > args.sample_nodes {
+            debug!("The {} species graph has too many nodes. Subsample {}.", gurobi_opt_var.otu, args.sample_nodes);
+            sample_sorted(&valid_nodes, args.sample_nodes, 42)
+        } else {
+            valid_nodes
+        }
+    } else {
+        valid_nodes
+    };
+
+    let mut y_var_map = FxHashMap::default();
+    for &v in &sample_valid_nodes {
+        let var_name = format!("y{}", v);
+        let yv = problem.add_variable(
+            cplex_rs::Variable::new(
+                VariableType::Continuous,
+                0.0,
+                0.0, 
+                f64::INFINITY,
+                &var_name
+            )
+        )?;
+        y_var_map.insert(v, yv);
+    }
+
+    let n_eval = sample_valid_nodes.len();
+    for &v in &sample_valid_nodes {
+        let row = coeff_matrix.row(v);
+        let mut coeffs = Vec::new();
+        
+        for (j, val) in row.iter().enumerate() {
+            if val.abs() > 1e-12 {
+                if let Some(&x_var) = var_map.get(&j) {
+                    coeffs.push((x_var, *val as f64));
+                }
+            }
+        }
+        
+        let abundance = node_abundance_vec[v];
+        let yv = y_var_map[&v];
+        
+        // constraint 1: y >= sum(x) - abundance
+        // convert: y - sum(x) >= -abundance
+        let mut constr1_coeffs = vec![(yv, 1.0)];
+        for &(var, coeff) in &coeffs {
+            constr1_coeffs.push((var, -coeff));
+        }
+        problem.add_constraint(
+            cplex_rs::Constraint::new(
+                ConstraintType::GreaterThanEq,
+                -abundance,
+                None,
+                constr1_coeffs
+            )
+        )?;
+        
+        // constraint 2: y >= abundance - sum(x)
+        // convert: y + sum(x) >= abundance
+        let mut constr2_coeffs = vec![(yv, 1.0)];
+        for &(var, coeff) in &coeffs {
+            constr2_coeffs.push((var, coeff));
+        }
+        problem.add_constraint(
+            cplex_rs::Constraint::new(
+                ConstraintType::GreaterThanEq,
+                abundance,
+                None,
+                constr2_coeffs
+            )
+        )?;
+    }
+
+    let mut objective_coeffs = Vec::new();
+    let objective_weight = 1.0 / n_eval as f64;
+    
+    for &v in &sample_valid_nodes {
+        let yv = y_var_map[&v];
+        objective_coeffs.push((yv, objective_weight));
+    }
+    
+    problem = problem.set_objective(ObjectiveType::Minimize, objective_coeffs)?;
+
+    let solution = problem.solve_as(ProblemType::Linear)?;
+
+    let mut sols = Vec::with_capacity(npaths);
+    for i in 0..npaths {
+        let x_var = var_map[&i];
+        let sol = solution.variable_value(x_var);
+        sols.push(sol);
+    }
+    
+    let objval = solution.objective_value();
+    debug!("\t\t{}\t{:?}\t{}", gurobi_opt_var.otu, sols, objval);
+
+    for (i, sol) in sols.iter().enumerate() {
+        gurobi_opt_var.hap_metrics[gurobi_opt_var.possible_paths_idx[i]].first_sol = Some(*sol);
+    }
+
+    let nstrains = sols.iter().filter(|&&x| x > 0.0).count();
+    debug!("\t\tFirst optimization #strains / #paths = {} / {}", nstrains, npaths);
+
+    second_filter_paths(gurobi_opt_var, &args);   
+    if !gurobi_opt_var.second_opt {
+        if args.debug { print!("\n"); }
+        return Ok(());
+    }
+
+    debug!("\t\tSecond filter #strains / #paths = {} / {}", gurobi_opt_var.second_possible_paths_idx.len(), npaths); 
+
+    let mut env = Environment::new()?;
+    env.set_parameter(cplex_rs::parameters::Threads(args.gurobi_threads as u32))?;
+    let mut problem2 = Problem::new(env, "lp_second")?;
+
+    let mut var_map2 = FxHashMap::default();
+    for i in 0..npaths {
+        let var_name = format!("x{}_second", i);
+        let var = problem2.add_variable(
+            cplex_rs::Variable::new(
+                VariableType::Continuous,
+                0.0,
+                0.0,
+                1.05 * max_val,
+                &var_name
+            )
+        )?;
+        var_map2.insert(i, var);
+    }
+
+    let mut x_binary_var_map2 = FxHashMap::default();
+    if npaths > 0 {
+        let mut sum_x_binary_vars2 = Vec::new();
+        
+        for i in 0..npaths {
+            let var_name = format!("strain_indicator_{}_second", i);
+            let bin_var = problem2.add_variable(
+                cplex_rs::Variable::new(
+                    VariableType::Binary,
+                    0.0,
+                    0.0,
+                    1.0,
+                    &var_name
+                )
+            )?;
+            x_binary_var_map2.insert(i, bin_var);
+            sum_x_binary_vars2.push((bin_var, 1.0));
+            
+            let x_var = var_map2[&i];
+            let coeffs = vec![
+                (x_var, 1.0),
+                (bin_var, -2.0 * max_val)
+            ];
+            problem2.add_constraint(
+                cplex_rs::Constraint::new(
+                    ConstraintType::LessThanEq,
+                    args.minimization_min_cov,
+                    None,
+                    coeffs
+                )
+            )?;
+        }
+        
+        problem2.add_constraint(
+            cplex_rs::Constraint::new(
+                ConstraintType::LessThanEq,
+                npaths as f64,
+                None,
+                sum_x_binary_vars2
+            )
+        )?;
+    }
+
+    let mut y_var_map2 = FxHashMap::default();
+    for &v in &sample_valid_nodes {
+        let var_name = format!("y{}_second", v);
+        let yv = problem2.add_variable(
+            cplex_rs::Variable::new(
+                VariableType::Continuous,
+                0.0,
+                0.0,
+                f64::INFINITY,
+                &var_name
+            )
+        )?;
+        y_var_map2.insert(v, yv);
+    }
+
+    for &v in &sample_valid_nodes {
+        let row = coeff_matrix.row(v);
+        let mut coeffs = Vec::new();
+        
+        for (j, val) in row.iter().enumerate() {
+            if val.abs() > 1e-12 {
+                if let Some(&x_var) = var_map2.get(&j) {
+                    coeffs.push((x_var, *val as f64));
+                }
+            }
+        }
+        
+        let abundance = node_abundance_vec[v];
+        let yv = y_var_map2[&v];
+        
+        let mut constr1_coeffs = vec![(yv, 1.0)];
+        for &(var, coeff) in &coeffs {
+            constr1_coeffs.push((var, -coeff));
+        }
+        problem2.add_constraint(
+            cplex_rs::Constraint::new(
+                ConstraintType::GreaterThanEq,
+                -abundance,
+                None,
+                constr1_coeffs
+            )
+        )?;
+        
+        let mut constr2_coeffs = vec![(yv, 1.0)];
+        for &(var, coeff) in &coeffs {
+            constr2_coeffs.push((var, coeff));
+        }
+        problem2.add_constraint(
+            cplex_rs::Constraint::new(
+                ConstraintType::GreaterThanEq,
+                abundance,
+                None,
+                constr2_coeffs
+            )
+        )?;
+    }
+
+    let mut objective_coeffs2 = Vec::new();
+    for &v in &sample_valid_nodes {
+        let yv = y_var_map2[&v];
+        objective_coeffs2.push((yv, objective_weight));
+    }
+    
+    problem2 = problem2.set_objective(ObjectiveType::Minimize, objective_coeffs2)?;
+
+    for (i, &path_idx) in gurobi_opt_var.possible_paths_idx.iter().enumerate() {
+        if !gurobi_opt_var.second_possible_paths_idx.contains(&path_idx) {
+            let x_var = var_map2[&i];
+            problem2.add_constraint(
+                cplex_rs::Constraint::new(
+                    ConstraintType::Eq,
+                    0.0,
+                    None,
+                    vec![(x_var, 1.0)]
+                )
+            )?;
+        }
+    }
+
+    let solution2 = problem2.solve_as(ProblemType::Linear)?;
+    
+    let mut sols2 = Vec::with_capacity(npaths);
+    for i in 0..npaths {
+        let x_var = var_map2[&i];
+        let sol = solution2.variable_value(x_var);
+        sols2.push(sol);
+    }
+    
+    let objval2 = solution2.objective_value();
+    debug!("\t\t{}\t{:?}\t{}", gurobi_opt_var.otu, sols2, objval2);
+
+    let nstrains2 = sols2.iter().filter(|&&x| x > 0.0).count();
+    debug!("\t\tSecond optimization #strains / #paths = {} / {}\n", nstrains2, npaths);
+
+    for (&path_idx, sol) in gurobi_opt_var.possible_paths_idx.iter().zip(sols2) {
+        if gurobi_opt_var.second_possible_paths_idx.contains(&path_idx) {
+            if let Some(metric) = gurobi_opt_var.hap_metrics.get_mut(path_idx) {
+                metric.second_sol = Some(sol);
+            } else {
+                panic!("path_idx {} out of bounds for hap_metrics (len = {})", path_idx, gurobi_opt_var.hap_metrics.len());
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "cbc")]
 fn cbc_opt(
     gurobi_opt_var: &mut GurobiOptVar,
     nvert: usize,
@@ -1509,7 +1936,7 @@ fn cbc_opt(
         .fold(f64::NEG_INFINITY, f64::max);
 
     // 1. create x[i]
-    let mut var_map = HashMap::new();
+    let mut var_map = FxHashMap::default();
     let mut x_vec = Vec::new();
     
     for i in 0..npaths {
@@ -1551,7 +1978,7 @@ fn cbc_opt(
 
     // 3. strain indicator
     if npaths > 0 {
-        let mut x_binary_var_map = HashMap::new();
+        let mut x_binary_var_map = FxHashMap::default();
         let mut all_binary_vars = Vec::new();
     
         for i in 0..npaths {
@@ -1709,8 +2136,6 @@ fn cbc_opt(
 }
 
 #[cfg(feature = "glpk_rust")]
-use glpk_rust::*;
-#[cfg(feature = "glpk_rust")]
 fn glpk_opt(
     gurobi_opt_var: &mut GurobiOptVar,
     nvert: usize,
@@ -1857,7 +2282,7 @@ fn glpk_opt(
 
     // 8. object
     // for y_v, weight 1/n_eval
-    let mut objective = HashMap::new();
+    let mut objective = FxHashMap::default();
     let n_eval = sample_valid_nodes.len() as f64;
     for (_idx, &v) in sample_valid_nodes.iter().enumerate() {
         objective.insert(format!("y{}", v), 1.0 / n_eval);
@@ -1971,17 +2396,6 @@ fn glpk_opt(
     Ok(())
 }
 
-#[cfg(feature = "glpk")]
-use glpk_sys::{
-    glp_create_prob, glp_set_prob_name, glp_set_obj_dir, glp_add_cols, glp_set_col_name,
-    glp_set_col_bnds, glp_set_obj_coef, glp_set_col_kind, glp_add_rows, glp_set_row_name,
-    glp_set_row_bnds, glp_load_matrix, glp_mip_col_val, glp_delete_prob, glp_init_iocp, glp_intopt,
-    glp_get_obj_val, glp_term_out
-};
-#[cfg(feature = "glpk")]
-use std::ffi::CString;
-#[cfg(feature = "glpk")]
-use crate::constants::*;
 #[cfg(feature = "glpk")]
 fn glpk_opt_unsafe(
     gurobi_opt_var: &mut GurobiOptVar,
@@ -2272,8 +2686,7 @@ fn glpk_opt_unsafe(
     Ok(())        
 }
 
-use highs::{HighsModelStatus, RowProblem, Sense as HighsSense};
-
+#[cfg(feature = "hs")]
 fn highs_opt(
     opt_var: &mut GurobiOptVar,
     nvert: usize,
@@ -2493,18 +2906,29 @@ fn optimize_otu(args: &ProfilingConfig, otu: &String, start: u32, end: u32, read
 
     // debug!("{:?}", gfa_file);
     
-    let graph = match args.zip.as_deref() {
-        Some("serialize") => load_from_zip_graph(&gfa_file, CompressType::Serialized)
-            .map_err(|e| format!("GFA read error: {}", e)).ok()?,
-        Some("lz")        => load_from_zip_graph(&gfa_file, CompressType::Lz4)
-            .map_err(|e| format!("GFA read error: {}", e)).ok()?,
-        Some("zstd")      => load_from_zip_graph(&gfa_file, CompressType::Zstd)
-            .map_err(|e| format!("GFA read error: {}", e)).ok()?,
-        #[cfg(feature = "h5")]
-        Some("h5")      => load_from_zip_graph(&gfa_file, CompressType::Hdf5)
-            .map_err(|e| format!("GFA read error: {}", e)).ok()?,            
-        _                 => read_gfa(&gfa_file, 0)
-            .map_err(|e| format!("GFA read error: {}", e)).ok()?,
+    let graph = if gfa_file.exists() {
+        match args.zip.as_deref() {
+            Some("serialize") => load_from_zip_graph(&gfa_file, CompressType::Serialized)
+                .map_err(|e| format!("GFA read error: {}", e)).ok()?,
+            Some("lz")        => load_from_zip_graph(&gfa_file, CompressType::Lz4)
+                .map_err(|e| format!("GFA read error: {}", e)).ok()?,
+            Some("zstd")      => load_from_zip_graph(&gfa_file, CompressType::Zstd)
+                .map_err(|e| format!("GFA read error: {}", e)).ok()?,
+            #[cfg(feature = "h5")]
+            Some("h5")      => load_from_zip_graph(&gfa_file, CompressType::Hdf5)
+                .map_err(|e| format!("GFA read error: {}", e)).ok()?,            
+            _                 => read_gfa(&gfa_file, 0)
+                .map_err(|e| format!("GFA read error: {}", e)).ok()?,
+        }
+    } else {
+        let species_gfa = species_gfa_dir.join(format!("{}.gfa", otu));
+        if species_gfa.exists() {
+            read_gfa(&gfa_file, 0)
+                    .map_err(|e| format!("GFA read error: {}", e)).ok()?
+        } else {
+            eprintln!("gfa information file {} does not exist. Please check database.", species_gfa.display());
+            std::process::exit(1);
+        }
     };
 
     // debug!("First 100 nodes_len: {:?}", &graph.nodes_len[..graph.nodes_len.len().min(100)]);
@@ -2543,12 +2967,21 @@ fn optimize_otu(args: &ProfilingConfig, otu: &String, start: u32, end: u32, read
     first_filter_paths(&mut gurobi_opt_var, &graph.paths, &hap2unique_trio_nodes_m, &trio_node_abundance_vec, &node_abundance_opt_vec, &args);
     if !gurobi_opt_var.possible_paths_idx.is_empty() {
         match args.solver.to_lowercase().as_str() {
+            #[cfg(feature = "gb")]
             "gurobi" => {
                 if let Err(e) = gurobi_opt(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args) {
                     error!("Gurobi failed: {}", e);
                     return None;
                 }
             }
+            #[cfg(feature = "cp")]
+            "cplex" => {
+                if let Err(e) = cplex_opt(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args) {
+                    error!("cplex failed: {}", e);
+                    return None;
+                }
+            }            
+            #[cfg(feature = "cbc")]
             "cbc" => {
                 if let Err(e) = cbc_opt(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args) {
                     error!("Cbc failed: {}", e);
@@ -2562,6 +2995,7 @@ fn optimize_otu(args: &ProfilingConfig, otu: &String, start: u32, end: u32, read
                     return None;
                 }
             }
+            #[cfg(feature = "hs")]
             "highs" => {
                 if let Err(e) = highs_opt(&mut gurobi_opt_var, nvert as usize, &graph.paths, &node_abundance_vec, &node_base_cov, &graph.nodes_len, &args) {
                     error!("Highs failed: {}", e);

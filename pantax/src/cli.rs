@@ -1,5 +1,5 @@
 
-use crate::constants::CLI_HEADINGS;
+use crate::constants::{CLI_HEADINGS, DEFAULT_SOLVER};
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
@@ -52,7 +52,7 @@ pub struct Cli {
     pub strain: bool,
 
     /// Number of processes to run in parallel.
-    #[arg(short, long, default_value_t = num_cpus::get(), help_heading = CLI_HEADINGS[0])]
+    #[arg(short, long, default_value_t = default_threads(), help_heading = CLI_HEADINGS[0])]
     pub threads: usize,
 
     /// Create the database only.
@@ -60,8 +60,16 @@ pub struct Cli {
     pub create: bool,
 
     /// Create the database using genomes filtered by sylph query instead of all genomes.
-    #[arg(long = "fast", visible_alias = "mode", help_heading = CLI_HEADINGS[1])]
+    #[arg(long = "fast", help_heading = CLI_HEADINGS[1])]
     pub fast_query: bool,
+
+    /// old paras, --mode 1 same as --fast. 
+    #[arg(long, hide = true)]
+    pub mode: Option<i32>,
+
+    /// Specify Sylph syldb files. Sketching first can reduce runtime when processing multiple samples.
+    #[arg(long, help_heading = CLI_HEADINGS[1])]
+    pub syldb: Option<String>,
 
     /// ANI threshold for sylph query result filter.
     #[arg(short = 'A', long, default_value_t = 99., help_heading = CLI_HEADINGS[1])]
@@ -71,7 +79,7 @@ pub struct Cli {
     #[arg(short = 'g', long, help_heading = CLI_HEADINGS[1])]
     pub save: bool,
 
-    /// Serialized zip graph file saved with lz4 format (for save option)."
+    /// Serialized zip graph file saved with lz4 format (for save option).
     #[arg(long, help_heading = CLI_HEADINGS[1])]
     pub lz: bool,    
 
@@ -87,11 +95,11 @@ pub struct Cli {
     #[arg(long, help_heading = CLI_HEADINGS[2])]
     pub auto: bool,
 
-    /// Long read aligner (GraphAligner)
+    /// Long read aligner (GraphAligner, vg >= 1.71). Use vg need to set long read type with --lt, vg only support hifi and r10.
     #[arg(long, default_value = "GraphAligner", help_heading = CLI_HEADINGS[3])]
     pub lr_aligner: PathBuf,
 
-    /// Long read type (hifi, clr, ontr9, ontr10). Set precise clipping based on read type, and some empirical ANI for fast query.
+    /// Long read type (hifi, clr, ontr9, ontr10). Set precise clipping based on read type, and some empirical ANI for fast query, default is None.
     #[arg(long, visible_alias = "lt", help_heading = CLI_HEADINGS[3])]
     pub long_read_type: Option<String>,
 
@@ -143,12 +151,12 @@ pub struct Cli {
     #[arg(short = 'o', long = "ouput", help_heading = CLI_HEADINGS[4])]
     pub pantax_output: Option<String>,
 
-    /// MLP solver. (options: gurobi, cbc, glpk, highs)
-    #[clap(long = "solver", default_value = "Gurobi", help_heading = "GENERAL OPTIONS", help = "Model solver selection (Gurobi, Cbc).")]
+    /// MLP solver. (Gurobi, cplex, Cbc, highs, glpk)
+    #[clap(long = "solver", default_value = DEFAULT_SOLVER, help_heading = CLI_HEADINGS[4])]
     pub solver: String,
 
-    /// Gurobi threads.
-    #[clap(long = "gthreads", default_value_t = 1, help_heading = "STRAIN PROFILE PARAS OPTIONS", help = "Number of gurobi threads.")]
+    /// Solver threads.
+    #[clap(long = "gthreads", default_value_t = 1, help_heading = CLI_HEADINGS[4])]
     pub gurobi_threads: i32,
 
     /// Temporary directory.
@@ -163,20 +171,20 @@ pub struct Cli {
     #[arg(long, help_heading = CLI_HEADINGS[5])]
     pub debug: bool,
 
-    /// Debug.
+    /// Verbose.
     #[arg(short, long, help_heading = CLI_HEADINGS[5])]
     pub verbose: bool,
 
     /// Specifies a folder for the log files. 
-    #[arg(long, help_heading = CLI_HEADINGS[6])]
+    #[arg(long, help_heading = CLI_HEADINGS[6], hide = true)]
     pub log_dir: Option<PathBuf>,
 
     /// Add a marker String is added to the log file name. (e.g. sample name) 
-    #[arg(long, help_heading = CLI_HEADINGS[6])]
+    #[arg(long, help_heading = CLI_HEADINGS[6], hide = true)]
     pub log_m: Option<String>,        
 
     /// log level
-    #[arg(long = "log", value_enum, default_value = "debug", help_heading = CLI_HEADINGS[6])]
+    #[arg(long = "log", value_enum, default_value = "debug", help_heading = CLI_HEADINGS[6], hide = true)]
     pub log_level: LogLevel,
 
     /// only query and filter.
@@ -198,6 +206,10 @@ pub struct Cli {
     /// Path to vg executable file.
     #[arg(long, default_value = "vg", hide = true)]
     pub vg: PathBuf,
+
+    /// vg executable file version.
+    #[arg(long, default_value = "v1", hide = true)]
+    pub vg_lvl: VgLevel,
 
     /// Path to pangenome building tool executable file.
     #[arg(long, default_value = "pggb", hide = true)]
@@ -221,11 +233,23 @@ pub struct Cli {
 
     /// 0 (use all genomes), 1 (use sylph filter genomes, dataset specificity).
     #[arg(long, hide = true)]
-    pub mode: Option<i32>,
+    pub smode: Option<i32>,
 
     /// test, for save ori_strain_abundance.txt
     #[arg(long, hide = true)]
     pub test: bool,    
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
+pub enum VgLevel {
+    V1,
+    V2,
+}
+
+impl Default for VgLevel {
+    fn default() -> Self {
+        VgLevel::V1
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
@@ -277,4 +301,7 @@ impl Cli {
     }
 }
 
-
+fn default_threads() -> usize {
+    let t = (num_cpus::get() + 1) / 2;
+    if t == 0 { 1 } else { t }
+}

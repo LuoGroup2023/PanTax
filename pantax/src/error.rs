@@ -1,4 +1,8 @@
+
+#[cfg(feature = "gb")]
 use grb::Error as GurobiError;
+
+#[cfg(feature = "hs")]
 use highs::HighsStatus;
 use std::fmt::Debug;
 #[derive(Debug)]
@@ -36,9 +40,11 @@ impl std::error::Error for GlpkError {}
 
 #[derive(Debug)]
 pub enum SolverError {
+    #[cfg(feature = "gb")]
     Gurobi(GurobiError),
     Cbc(CbcError),
     Glpk(GlpkError),
+    #[cfg(feature = "hs")]
     Highs(HighsStatus),
     Other(String),
 }
@@ -48,15 +54,18 @@ impl std::error::Error for SolverError {}
 impl std::fmt::Display for SolverError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            #[cfg(feature = "gb")]
             SolverError::Gurobi(e) => write!(f, "Gurobi error: {}", e),
             SolverError::Cbc(e) => write!(f, "CBC error: {:?}", e),
             SolverError::Glpk(e) => write!(f, "Glpk error: {:?}", e),
+            #[cfg(feature = "hs")]
             SolverError::Highs(e) => write!(f, "Highs error: {:?}", e),
             SolverError::Other(msg) => write!(f, "Other solver error: {}", msg),
         }
     }
 }
 
+#[cfg(feature = "gb")]
 impl From<GurobiError> for SolverError {
     fn from(e: GurobiError) -> Self {
         SolverError::Gurobi(e)
@@ -75,6 +84,7 @@ impl From<GlpkError> for SolverError {
     }
 }
 
+#[cfg(feature = "hs")]
 impl From<HighsStatus> for SolverError {
     fn from(e: HighsStatus) -> Self {
         SolverError::Highs(e)

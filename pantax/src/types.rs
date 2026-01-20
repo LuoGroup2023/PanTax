@@ -1,4 +1,5 @@
 
+use crate::cli::Cli;
 use serde::{Serialize, Deserialize};
 use std::{collections::BTreeMap, path::PathBuf};
 #[derive(Default, Debug)]
@@ -31,9 +32,16 @@ pub enum DataType {
 }
 
 impl DataType {
-    pub fn needs_index(&self) -> bool {
+    pub fn needs_index(&self, args: &Cli) -> bool {
         match self {
-            DataType::LongReadSingle => false,
+            DataType::LongReadSingle => {
+                // if args.lr_aligner.components().any(|c| c.as_os_str() == "vg") {
+                if args.lr_aligner.to_string_lossy().contains("vg") {
+                    true
+                } else {
+                    false
+                }
+            },
             _ => true,
         }
     }    

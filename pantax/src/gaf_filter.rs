@@ -60,6 +60,8 @@ pub fn filter_max_alignment_mt<P: AsRef<Path>>(gaf_file: P) -> Result<PathBuf> {
     // Step 1: Find best alignment per read_id using DashMap
     let best_map: DashMap<String, (i32, f64)> = DashMap::new();
 
+    // TODO: chimera alignments process
+    // Currently, chimera alignments are not considered, although they are rare.
     records.par_iter().for_each(|rec| {
         best_map
             .entry(rec.read_id.clone())

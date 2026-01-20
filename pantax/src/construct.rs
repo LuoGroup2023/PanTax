@@ -32,7 +32,12 @@ pub fn construct(genomes_metadata: &mut Vec<GenomesInfo>, data_type: &DataType, 
             // println!("read_files: {:?}", read_files);
             // println!("is_interleaved: {}", is_interleaved);
             let out_prefix = Some(global_config.query_res.to_string_lossy().into_owned());
-            let mut query_res = contain_new(&reference_genomes_paths, &read_files, &out_prefix, is_interleaved);
+            let mut query_res = if let Some(syldb) = &args.syldb {
+                log::debug!("Use syldb file: {}", syldb);
+                contain_new(&vec![syldb.clone()], &read_files, &out_prefix, is_interleaved)
+            } else {
+                contain_new(&reference_genomes_paths, &read_files, &out_prefix, is_interleaved)
+            };
             query_res.retain(|x| x.2 >= args.ani);
             // for (_, s, _) in query_res.iter_mut() {
             //     if let Some(first) = s.split_whitespace().next() {
@@ -92,7 +97,7 @@ pub fn construct(genomes_metadata: &mut Vec<GenomesInfo>, data_type: &DataType, 
         }
         parallel_convert_and_zip(&gfa_paths, args)?;    
     } else {
-        log::info!("No species has 1 genome.");
+        log::info!("No species has only 1 genome.");
     }
     let all_species: Vec<&String> = all_multispecies
         .iter()

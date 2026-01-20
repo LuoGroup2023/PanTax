@@ -1,12 +1,12 @@
 
 use crate::types::*;
-use crate::cli::Cli;
+use crate::cli::{Cli, VgLevel};
 use crate::constants::GENOMES_INFO;
 use std::process::Command;
 use std::io::{Write, BufWriter};
 use std::fs::File;
 use std::path::PathBuf;
-use anyhow::{Result, Context};
+use anyhow::{Result, Context, anyhow};
 use std::sync::OnceLock;
 
 /// Some custom directory path and file path
@@ -28,6 +28,7 @@ pub struct GlobalConfig {
     pub range_file_db: PathBuf,
     pub species_genomes_stats: PathBuf,
     pub index_files: Vec<PathBuf>,
+    pub autoindex_prefix: PathBuf,
     pub gfa_mapped: PathBuf,
     pub pantax_report: Option<PathBuf>,
     pub species_abund_file: PathBuf,
@@ -69,7 +70,32 @@ pub fn init_global_config(args: &Cli) {
     let reference_pangenome_min = args.db.join("reference_pangenome.min");
     let reference_pangenome_giraffe_gbz = args.db.join("reference_pangenome.giraffe.gbz");
     let reference_pangenome_dist = args.db.join("reference_pangenome.dist");
-    
+    let reference_pangenome_sr_withzip_min = args.db.join("reference_pangenome.shortread.withzip.min");
+    let reference_pangenome_sr_zipcodes = args.db.join("reference_pangenome.shortread.zipcodes");
+    let reference_pangenome_lr_withzip_min = args.db.join("reference_pangenome.longread.withzip.min");
+    let reference_pangenome_lr_zipcodes = args.db.join("reference_pangenome.longread.zipcodes");
+    let autoindex_prefix = args.db.join("reference_pangenome");
+    let index_files = match (args.short_read, &args.vg_lvl) {
+        (true, VgLevel::V1) => vec![
+            reference_pangenome_giraffe_gbz,
+            reference_pangenome_dist,
+            reference_pangenome_min,
+        ],
+
+        (true, VgLevel::V2) => vec![
+            reference_pangenome_giraffe_gbz,
+            reference_pangenome_dist,
+            reference_pangenome_sr_withzip_min,
+            reference_pangenome_sr_zipcodes,
+        ],
+
+        (false, _) => vec![
+            reference_pangenome_giraffe_gbz,
+            reference_pangenome_dist,
+            reference_pangenome_lr_withzip_min,
+            reference_pangenome_lr_zipcodes,
+        ],
+    };
     let config = GlobalConfig {
         genomes_metadata,
         query_res,
@@ -87,7 +113,8 @@ pub fn init_global_config(args: &Cli) {
         reference_pangenome_gfa_db,
         range_file_db,
         species_genomes_stats,
-        index_files: vec![reference_pangenome_giraffe_gbz, reference_pangenome_dist, reference_pangenome_min],
+        index_files,
+        autoindex_prefix,
         gfa_mapped,
         pantax_report,
         species_abund_file,
@@ -147,4 +174,59 @@ pub fn run_shell_command(command: &str) -> Result<()> {
     }
        
     Ok(())
+}
+
+pub fn get_vg_version(args: &Cli) -> Result<String> {
+    let output = Command::new(&args.vg)
+        .arg("version")
+        .output()
+        .context("Failed to execute vg")?;
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "vg returned non-zero status: {}",
+            output.status
+        ));
+    }
+
+    let stdout = String::from_utf8(output.stdout)
+        .context("Invalid UTF-8 output from vg")?;
+
+    let first_line = stdout
+        .lines()
+        .next()
+        .ok_or_else(|| anyhow!("Empty vg output"))?;
+
+    let version = first_line
+        .split_whitespace()
+        .nth(2)
+        .ok_or_else(|| anyhow!("No version found in vg output"))?
+        .trim_start_matches('v');
+
+    Ok(version.to_string())
+}
+
+pub fn compare_version(v1: &str, v2: &str) -> i32 {
+    let parse = |v: &str| {
+        v.split('.')
+            .map(|x| x.parse::<i32>().unwrap_or(0))
+            .collect::<Vec<_>>()
+    };
+
+    let a = parse(v1);
+    let b = parse(v2);
+
+    let n = a.len().max(b.len());
+
+    for i in 0..n {
+        let ai = *a.get(i).unwrap_or(&0);
+        let bi = *b.get(i).unwrap_or(&0);
+
+        if ai > bi {
+            return 1; // v1 > v2
+        } else if ai < bi {
+            return -1; // v1 < v2
+        }
+    }
+    0 // equal
 }
