@@ -341,7 +341,7 @@ fi
 # some tools work in different directory when install with conda or from source.
 if command -v conda >/dev/null 2>&1 || command -v mamba >/dev/null 2>&1; then
     conda_run_flag="True"
-else 
+else
     conda_run_flag="False"
 fi
 # set tools working path
