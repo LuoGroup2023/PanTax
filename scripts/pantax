@@ -339,7 +339,7 @@ if [ $create_db == "False" ] && [ $create_index == "False" ] && [ $query_and_fil
 fi
 
 # some tools work in different directory when install with conda or from source.
-if [[ $(which $0) == *conda* ]]; then
+if [ $(which $0) == *conda* ] || [ $(which $0) == *mamba* ] || [ $(which $0) == *miniforge* ]; then
     conda_run_flag="True"
 else 
     conda_run_flag="False"
