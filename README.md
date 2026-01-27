@@ -57,30 +57,6 @@ Before installation, please note that the **Path Abundance Optimization (PAO)** 
   In our tests, these solvers produce solutions that are **comparable in quality** to Gurobi, but they are **significantly slower**.
 
 
-```
-mamba install -c bioconda -c conda-forge -c gurobi -c defaults \
-    python=3.10 \
-    r-base=4.2 \
-    pggb=0.6.0 \
-    vg=1.59 \
-    graphaligner \
-    sylph \
-    fastani \
-    pandas \
-    numpy \
-    tqdm \
-    networkx \
-    pyarrow \
-    gurobi=11 \
-    clang \
-    rust=1.82 \
-    hdf5=1.10.5 \
-    glpk \
-    coin-or-cbc \
-    htslib
-```
-
-
 ## Installation
 
 PanTax is now distributed as multiple executables based on different solvers:
@@ -105,24 +81,26 @@ pantax -h
 git clone https://github.com/LuoGroup2023/PanTax.git -b all-rust
 conda create -n pantax
 conda activate pantax
-conda install -c bioconda -c conda-forge -c gurobi -c defaults \
+condas install -c bioconda -c conda-forge -c gurobi -c defaults \
     python=3.10 \
     r-base=4.2 \
     pggb=0.6.0 \
     vg=1.59 \
     graphaligner \
-    sylph\
+    sylph \
     fastani \
     pandas \
-    tqdm \
     numpy \
+    tqdm \
     networkx \
     pyarrow \
     gurobi=11 \
     clang \
     rust=1.82 \
     hdf5=1.10.5 \
-    glpk 
+    glpk \
+    coin-or-cbc \
+    htslib
 cd PanTax
 
 # default 
