@@ -4,3 +4,4 @@ tests
 pantax_conda
 docker_local
 pantax/target
+scripts/pantax*
