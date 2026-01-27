@@ -8,6 +8,9 @@
 [![GitHub forks](https://img.shields.io/github/forks/LuoGroup2023/PanTax?color=lightblue&label=fork)](https://github.com/LuoGroup2023/PanTax/network/members) 
 <!-- [![visitors](https://visitor-badge.laobi.icu/badge?page_id=LuoGroup2023.PanTax)](https://github.com/LuoGroup2023/PanTax) -->
 
+Read more about PanTax here:
+> [Strain-level metagenomic profiling using pangenome graphs with PanTax](https://genome.cshlp.org/content/early/2026/01/13/gr.280858.125)
+
 
 ## Table of Contents
 
@@ -43,7 +46,7 @@ Before installation, please note that the **Path Abundance Optimization (PAO)** 
 
 - **Gurobi** is the recommended solver and generally provides the best performance.
   `Gurobi` is a commercial solver, and its free (Community) edition is not suitable for solving large-scale optimization problems. Furthermore, the deployment and use of Gurobi on HPC and large-scale server clusters may introduce additional complexity.
-  If you need to use `Gurobi`, please be sure to refer to [Gurobi license](#gurobi-license) to obtain a license. If necessary, we will later release a version that does not rely on gurobi to build, which only allows other open source solvers.
+  If you need to use `Gurobi`, please be sure to refer to [Gurobi license](#gurobi-license) to obtain a license.
   **Academic users may apply for a free academic license from Gurobi.**
 
 - **CPLEX** is the recommended solver
@@ -479,13 +482,12 @@ The first one (pantax) uses the default solver configuration.
 
 ## Citation
 ```
-@article{luo2025strain,
+@article{zhang2026strain,
   title={Strain-level metagenomic profiling using pangenome graphs with PanTax},
-  author={Luo, Xiao and Zhang, Wenhai and Liu, Yuansheng and Li, Guangyi and Xu, Jialu and Chen, Enlian and Schonhuth, Alexander},
-  journal={bioRxiv},
-  pages={2025--04},
-  year={2025},
-  publisher={Cold Spring Harbor Laboratory}
+  author={Zhang, Wenhai and Liu, Yuansheng and Li, Guangyi and Xu, Jialu and Chen, Enlian and Sch{\"o}nhuth, Alexander and Luo, Xiao},
+  journal={Genome Research},
+  year={2026},
+  publisher={Cold Spring Harbor Lab}
 }
 ```
 
