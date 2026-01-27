@@ -2891,11 +2891,6 @@ fn optimize_otu(args: &ProfilingConfig, otu: &String, start: u32, end: u32, read
         args.db.join("species_gfa")
     };
     
-    if !species_gfa_dir.exists() {
-        eprintln!("{:?} does not exist! Skipping.", species_gfa_dir);
-        return None;
-    }
-    
     let gfa_file = match args.zip.as_deref() {
         Some("serialize") => species_gfa_dir.join(format!("{}.bin", otu)),
         Some("lz")        => species_gfa_dir.join(format!("{}.bin.lz4", otu)),
@@ -2907,6 +2902,10 @@ fn optimize_otu(args: &ProfilingConfig, otu: &String, start: u32, end: u32, read
     // debug!("{:?}", gfa_file);
     
     let graph = if gfa_file.exists() {
+        if !species_gfa_dir.exists() {
+            eprintln!("{:?} does not exist! Skipping.", species_gfa_dir);
+            return None;
+        }
         match args.zip.as_deref() {
             Some("serialize") => load_from_zip_graph(&gfa_file, CompressType::Serialized)
                 .map_err(|e| format!("GFA read error: {}", e)).ok()?,
@@ -2921,9 +2920,10 @@ fn optimize_otu(args: &ProfilingConfig, otu: &String, start: u32, end: u32, read
                 .map_err(|e| format!("GFA read error: {}", e)).ok()?,
         }
     } else {
-        let species_gfa = species_gfa_dir.join(format!("{}.gfa", otu));
+        let species_gfa = args.db.join("species_gfa").join(format!("{}.gfa", otu));
+        // log::debug("specify zip but file does not exist, check gfa file {}.", species_gfa);
         if species_gfa.exists() {
-            read_gfa(&gfa_file, 0)
+            read_gfa(&species_gfa, 0)
                     .map_err(|e| format!("GFA read error: {}", e)).ok()?
         } else {
             eprintln!("gfa information file {} does not exist. Please check database.", species_gfa.display());

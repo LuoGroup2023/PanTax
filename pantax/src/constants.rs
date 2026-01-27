@@ -5,16 +5,31 @@ pub const CHUNK_SIZE: usize = 1024;
 #[cfg(feature = "gb")]
 pub const DEFAULT_SOLVER: &str = "gurobi";
 
-#[cfg(feature = "cp")]
+#[cfg(all(not(feature = "gb"), feature = "cp"))]
 pub const DEFAULT_SOLVER: &str = "cplex";
 
-#[cfg(feature = "glpk")]
-pub const DEFAULT_SOLVER: &str = "glpk";
-
-#[cfg(feature = "hs")]
+#[cfg(all(
+    not(feature = "gb"),
+    not(feature = "cp"),
+    feature = "hs"
+))]
 pub const DEFAULT_SOLVER: &str = "highs";
 
-#[cfg(feature = "free")]
+#[cfg(all(
+    not(feature = "gb"),
+    not(feature = "cp"),
+    not(feature = "hs"),
+    feature = "glpk"
+))]
+pub const DEFAULT_SOLVER: &str = "glpk";
+
+#[cfg(all(
+    not(feature = "gb"),
+    not(feature = "cp"),
+    not(feature = "hs"),
+    not(feature = "glpk"),
+    feature = "free"
+))]
 pub const DEFAULT_SOLVER: &str = "highs";
 
 // glpk

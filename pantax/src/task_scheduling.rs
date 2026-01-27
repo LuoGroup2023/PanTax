@@ -76,7 +76,7 @@ fn initialize_and_get_task_config(args: &Cli, multi_species2genomes: &FxHashMap<
     }
 
     let parallel = if args.no_parallel { false } else { true };
-    let save = args.save;
+    let save = !args.no_save;
     // let force = args.force;
     let debug = args.debug;
     let verbose = args.verbose;

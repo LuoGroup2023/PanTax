@@ -1,6 +1,6 @@
 [package]
 name = "pantax"
-version = "2.0.1"
+version = "2.1.0"
 edition = "2021"
 
 [dependencies]
@@ -65,7 +65,7 @@ path = "src/bin/pantax_cp.rs"
 panic = "abort"
 
 [features]
-default = ["dev_test", "glpk", "hs", "cbc", "gb", "cp"]
+default = ["dev_test", "glpk", "hs", "cbc", "gb"]
 free = ["glpk", "hs", "cbc"]
 dev_test = [] 
 glpk_rust = ["glpk-rust"]

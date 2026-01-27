@@ -48,7 +48,7 @@ impl CompressType {
             Ok(CompressType::Lz4)
         } else if args.zstd {
             Ok(CompressType::Zstd)
-        } else if args.save {
+        } else if !args.no_save {
             Ok(CompressType::Serialized)
         } else {
             eprintln!("Error: no compression format specified!");

@@ -1,12 +1,6 @@
-scripts/mark_pangenome_eq1.py
 scripts/__pycache__/
-tools/gurobipy-11.0.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
 synchronous.sh
-pantaxr/tests
-pantaxr/target
-pantaxr/genomes
-pantaxr/Cargo.lock
-scripts/pantaxr
 tests
 pantax_conda
 docker_local
+pantax/target

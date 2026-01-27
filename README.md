@@ -12,7 +12,8 @@
 ## Table of Contents
 
 + [Overview](#overview)
-+ [Installation (v2.0.0)](#installation-version-200)
++ [Solvers to Know Before Installation](#solvers-to-know-before-installation)
++ [Installation](#installation)
 + [Gurobi license](#gurobi-license)
 + [Genome preprocessing](#genome-preprocessing)
 + [Running](#running)
@@ -23,23 +24,72 @@
 + [Change](#change)
 + [TODO](#todo)
 + [Citation](#citation)
++ [Patent](#patent-notice)
 
 ---
 
 > [!IMPORTANT]
-> **Pantax v2.0.0 is released.**
+> **Pantax v2.1.0 is released.**
 > 
-> The species and strain profiling module, the conversion of a single strain into a GFA module, the graph node and path information serialization and compression module, and the long read GAF filtering module are all rewritten using Rust. They are all integrated into the subcommand of `pantaxr`. It runs more than 25x faster in profiling. After fixing some major bugs and adjusting parameters, it is expected that the precision will be greatly improved and the recall will basically not change.
+> In this release, the entire codebase has been rewritten using a single language, Rust, instead of the previous mixture of Shell, Python, and Rust. In addition, several new features have been introduced. Detailed see release changlog.
 
 ## Overview
 
 PanTax is a pangenome graph-based taxonomic profiling tool designed for accurate strain-level classification of metagenomic sequencing data. Unlike traditional methods that rely on multiple linear reference genomes, PanTax leverages pangenome graphs to better represent genetic variation and relationships across related genomes. It supports both short and long reads, works across single or multiple species, and delivers superior precision or recall at the strain level. PanTax provides a robust, scalable solution to taxonomic classification for strain resolution, overcoming key limitations of existing tools.
 
-## Installation (Version 2.0.0)
+## Solvers to Know Before Installation
 
-Before installation, we explain here that the **Path Abundance Optimization (PAO)** of `PanTax` depends on the ILP solver. The `Gurobi` solver is the best choice, but it is a commercial ILP solver that requires a license. For academic researchers, they can apply for an academic license in `Gurobi`. We also support open source ILP solvers, such as `highs`, `cbc`, `glpk`. In the test, their best solution results are similar, but their speed is much slower than that of `Gurobi`.
+Before installation, please note that the **Path Abundance Optimization (PAO)** module in `PanTax` depends on an **ILP solver**.
 
-If you need to use `Gurobi`, please be sure to refer to [Gurobi license](#gurobi-license) to obtain a license. If necessary, we will later release a version that does not rely on gurobi to build, which only allows other open source solvers.
+- **Gurobi** is the recommended solver and generally provides the best performance.
+  `Gurobi` is a commercial solver, and its free (Community) edition is not suitable for solving large-scale optimization problems. Furthermore, the deployment and use of Gurobi on HPC and large-scale server clusters may introduce additional complexity.
+  If you need to use `Gurobi`, please be sure to refer to [Gurobi license](#gurobi-license) to obtain a license. If necessary, we will later release a version that does not rely on gurobi to build, which only allows other open source solvers.
+  **Academic users may apply for a free academic license from Gurobi.**
+
+- **CPLEX** is the recommended solver
+  `CPLEX` is also a commercial solver, and its free (Community) edition is not suitable for solving large-scale optimization problems. We therefore recommend that researchers use the academic edition, which removes these limitations. The installation process of `CPLEX` is relatively complex: users need to register on the IBM website, download the installer locally, and complete the manual installation.
+
+- We also support several **open-source ILP solvers**, including:
+  - `HiGHS`
+  - `CBC`
+  - `GLPK`
+
+  In our tests, these solvers produce solutions that are **comparable in quality** to Gurobi, but they are **significantly slower**.
+
+
+```
+mamba install -c bioconda -c conda-forge -c gurobi -c defaults \
+    python=3.10 \
+    r-base=4.2 \
+    pggb=0.6.0 \
+    vg=1.59 \
+    graphaligner \
+    sylph \
+    fastani \
+    pandas \
+    numpy \
+    tqdm \
+    networkx \
+    pyarrow \
+    gurobi=11 \
+    clang \
+    rust=1.82 \
+    hdf5=1.10.5 \
+    glpk \
+    coin-or-cbc \
+    htslib
+```
+
+
+## Installation
+
+PanTax is now distributed as multiple executables based on different solvers:
+```
+pantax (gurobi, highs, cbc, glpk) — default
+pantax-gb (gurobi)
+pantax-cp (cplex)
+pantax-free (highs, cbc, glpk)
+```
 
 * **From bioconda**
 ```
@@ -52,7 +102,7 @@ pantax -h
 
 * **From source**
 ```
-git clone https://github.com/LuoGroup2023/PanTax.git -b rust_dev
+git clone https://github.com/LuoGroup2023/PanTax.git -b all-rust
 conda create -n pantax
 conda activate pantax
 conda install -c bioconda -c conda-forge -c gurobi -c defaults \
@@ -60,9 +110,9 @@ conda install -c bioconda -c conda-forge -c gurobi -c defaults \
     r-base=4.2 \
     pggb=0.6.0 \
     vg=1.59 \
-    graphaligner=1.0.17 \
-    sylph=0.6.1 \
-    fastani=1.33 \
+    graphaligner \
+    sylph\
+    fastani \
     pandas \
     tqdm \
     numpy \
@@ -74,21 +124,19 @@ conda install -c bioconda -c conda-forge -c gurobi -c defaults \
     hdf5=1.10.5 \
     glpk 
 cd PanTax
-bash install.sh v2
 
-# If vg is not available, install with conda.(optional)
-conda create -n vg python=3.10
-conda activate vg
-conda install vg=1.59 -c bioconda
-cd tools
-ln -fs $(which vg) ./
+# default 
+bash install.sh
+
+# cplex
+# for example: bash install.sh cplex /home/work/wenhai/tools/cplex/CPLEX_Studio1210/cplex
+bash install.sh cplex /path/to/cplex
 
 # Run pantax
 cd ../scripts
 ./pantax -h
 ```
-If the installation environment encounters problems, you can also use `conda env create -f rust_dev.yaml -y` to build it.
-You may also choose not to specify the version of the tool, but the impact of using the latest version has not yet been tested.
+If the installation environment encounters problems, you can also use `conda env create -f pantax.yaml -y` to build it.
 
 * **From docker**
 ```
@@ -137,11 +185,11 @@ We recommend removing plasmids and redundancy from the genome first with `--remo
 If genomes are all in NCBI refseq database, you only need to use `-r` option to specify the directory containing these genomes.
 
 ```
-/path/to/PanTax/scripts/data_preprocessing -r ref --remove --cluster
+/path/to/PanTax/scripts/pantax-rg -r ref --remove --cluster
 ```
 Otherwise, you need to provide a file containing information about the custom genomes.
 ```
-/path/to/PanTax/scripts/data_preprocessing -c genomes_info.txt --remove --cluster
+/path/to/PanTax/scripts/pantax-rg -c genomes_info.txt --remove --cluster
 ```
 The `genomes_info.txt` file gives a list of reference genomes in fasta format, which constitute PaxTax's original database, alongwith NCBI's taxonomic information. The input lines in the file should contain at least 5 tab-delimited fields; from left to right, they are Genome IDs, Strain taxonomic IDs, Species taxonomic IDs, Organism names, Genome absolute path.
 Here is an example format of `genomes_info.txt` file:
@@ -152,6 +200,9 @@ GCF_025402875.1_ASM2540287v1	24.1	24	Shewanella putrefaciens	/path/to/GCF_025402
 ```
 
 ## Running
+
+**See [`test/pantax.sh`](test/pantax.sh) for the more commands.**
+
 * **Create database only** 
 ```
 pantax -f $genome_info --create
@@ -198,59 +249,88 @@ pantax -f $genome_info -s -p -r $fq -db $db --species --strain --solver glpk
 
 ## Options
 ```
-Usage: /path/to/PanTax/scripts/pantax -f genomes_info -s/-l -r read.fq [option]
-       paired-end: /path/to/PanTax/scripts/pantax -f genomes_info -s -p -r read.fq --species-level --strain-level
-
 Strain-level metagenomic profiling using pangenome graphs with PanTax
-    General options:
-        -f, --genomesInformation file:    A list of reference genomes in specified format. (Mandatory)
-        -db dir                           Name for pantax DB (default: pantax_db).
-        -T dir                            Temporary directory (default: pantax_db_tmp).
-        -n, --next                        Keep the temporary folder for later use at the strain level (resume).
-        -t, --threads int                 Number of processes to run in parallel. (default: all available)
-        -v, --verbose                     Detailed database build log.
-        --vg file                         Path to vg executable file.
-        --debug                           Keep the temporary folder for any situation.
-        --help, -h                        Print this help message.
-        --version                         Print the version info.
-    Database creation:
-        --create                          Create the database only.
-        --fast                            Create the database using genomes filtered by sylph query instead of all genomes.
-        -g, --save                        Save species graph information.
-            --lz                          Serialized zip graph file saved with lz4 format (for save option).
-            --zstd                        Serialized zip graph file saved with zstd format (for save option).
-        --force                           Force to rebuild pangenome.
-        -e file                           Path to pangenome building tool executable file. (default: pggb)
-        -A, --ani float                   ANI threshold for sylph query result filter. (default: 99)
-    Index construction(for vg giraffe):
-        --index                           Create the index only.
-        --best                            Best autoindex, which corresponds to vg autoindex. (only used with -s)
-        --fast-aln                        Long read fast alignment with vg instead of Graphaligner. (only used with -l)
-    Read alignment:
-        -r, --fastq-in file               Read and align FASTQ-format reads from FILE (two are allowed with -p).
-        -s, --short-read                  Short read alignment.
-        -p, --paired                      For paired-end alignment.
-        -l, --long-read                   Long read alignment.
-        -lt, --long-read-type str         Long read type (hifi, clr, ontr9, ontr10). Set precise-clipping based on read type.
-        --precise-clipping float          clip the alignment ends with arg as the identity cutoff between correct / wrong alignments. (default: 0.66)
-    Abundacnce calculation:
-        --species-level | --species       Species abundance calulation.
-        --strain-level | --strain         Strain abundance calulation.
-        --solver str                      MLP solver. (options: gurobi, cbc, glpk, highs. default: gurobi)
-        -a float                          Species with relative abundance above the threshold are used for strain abundance estimation. (default: 0.0001)
-        -fr float                         fstrain. The fraction of strain-specific triplet nodes covered by reads for one strain. The larger, the stricter.
-                                          (default: short 0.3/ long 0.5)
-        -fc float                         dstrain. The divergence between first rough and second refined strain abundance estimates. The smaller, the stricter.
-                                          (default: 0.46)
-        -sh, --shift bool                 Shifting fraction of strain-specific triplet nodes. (multi-species: off, single-species: on)
-        -sd float                         Coverage depth difference between the strain and its species, with only one strain. (default: 0.2)
-        -sr float                         Rescued strain retention score. (default: 0.85)
-        --min_cov int                     Minimum coverage depth required per strain. (default: 0)
-        --min_depth int                   Graph nodes with sequence coverage depth more than <min_depth>. (default: 0)
-        -gt int                           Gurobi threads. (default: 1)
-        -S, --classified-out str          File for alignment output(prefix).
-        -R, --report str                  File for read classification(binning) output(prefix).
-        -o, --ouput str                   File for abundance output(prefix).
+
+Usage: pantax [OPTIONS]
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+
+Basic options:
+  -r, --reads <READ_FILES>...
+          Read and align FASTQ-format reads from FILE (two are allowed with -p)
+  -f, --genomesInformation <GENOMES_INFO>
+          A list of reference genomes in specified format
+  -d, --db <DB>
+          Name for pantax database [default: pantax_db]
+  -s, --short-read
+          Short read alignment
+  -p, --paired
+          For paired-end alignment
+  -l, --long-read
+          Long read alignment
+      --species
+          Species abundance estimation [aliases: --species-level]
+      --strain
+          Strain abundance estimation [aliases: --strain-level]
+  -t, --threads <THREADS>
+          Number of processes to run in parallel [default: 64]
+
+Database creation:
+      --create         Create the database only
+      --fast           Create the database using genomes filtered by sylph query instead of all genomes
+      --syldb <SYLDB>  Specify Sylph syldb files. Sketching first can reduce runtime when processing multiple samples
+  -A, --ani <ANI>      ANI threshold for sylph query result filter [default: 99]
+      --no-save        Not serialize species graph information, save with gfa format
+      --lz             Serialized zip graph file saved with lz4 format
+      --zstd           Serialized zip graph file saved with zstd format
+
+Index construction(for vg giraffe):
+      --index  Create the index only. Make sure the pangenome construction is already complete and successful
+      --auto   Vg autoindex for read alignment
+
+Read alignment:
+      --lr-aligner <LR_ALIGNER>
+          Long read aligner (GraphAligner, vg >= 1.71). Use vg need to set long read type with --lt, vg only support hifi and r10 [default: GraphAligner]
+      --long-read-type <LONG_READ_TYPE>
+          Long read type (hifi, clr, ontr9, ontr10). Set precise clipping based on read type, and some empirical ANI for fast query, default is None [aliases: --lt]
+      --precise-clipping <PRECISE_CLIPPING>
+          clip the alignment ends with arg as the identity cutoff between correct / wrong alignments [default: 0.66]
+
+Profiling:
+      --fr <UNIQUE_TRIO_NODES_FRACTION>
+          fstrain. The fraction of strain-specific triplet nodes covered by reads for one strain. The larger, the stricter. (default: short 0.3/ long 0.5)
+      --fc <UNIQUE_TRIO_NODES_COUNT>
+          dstrain. The divergence between first rough and second refined strain abundance estimates. The smaller, the stricter. (default: 0.46)
+  -a <MIN_SPECIES_ABUNDANCE>
+          Species with relative abundance above the threshold are used for strain abundance estimation [default: 0.0001]
+      --sr <SINGLE_COV_RATIO>
+          Rescued strain retention score [default: 0.85]
+      --sd <SINGLE_COV_DIFF>
+          Coverage depth difference between the strain and its species, with only one strain [default: 0.2]
+      --shift <SHIFT>
+          Shifting fraction of strain-specific triplet nodes. (multi-species: off, single-species: on) [true, false] [aliases: --sh]
+      --min_cov <MIN_COV>
+          Minimum coverage depth required per strain [default: 0]
+      --min_depth <MIN_DEPTH>
+          Graph nodes with sequence coverage depth more than <min_depth> [default: 0]
+  -R, --report <PANTAX_REPORT>
+          File for read classification(binning) output(prefix)
+  -S, --classified-out <READ_ALN>
+          File for alignment output(prefix)
+  -o, --ouput <PANTAX_OUTPUT>
+          File for abundance output(prefix)
+      --solver <SOLVER>
+          MLP solver. (Gurobi, cplex, Cbc, highs, glpk) [default: gurobi]
+      --gthreads <GUROBI_THREADS>
+          Solver threads [default: 1]
+
+General options:
+  -T <TMP_DIR>   Temporary directory [default: pantax_db_tmp]
+  -n, --next     Keep the temporary folder for later use at the strain level (resume)
+      --debug    Debug
+  -v, --verbose  Verbose
 ```
 
 ## PanTax output
@@ -309,17 +389,17 @@ The eleventh column represents the difference between the sum of the average cov
 ```
 cd PanTax/example/hifi
 # species level
-pantax -f ../example_genomes_info.txt -l -r long_reads.fq.gz --species-level -n
+pantax -f ../example_genomes_info.txt -l -r long_reads.fq.gz --species -n
 # strain level
-pantax -f ../example_genomes_info.txt -l -r long_reads.fq.gz --strain-level -n
+pantax -f ../example_genomes_info.txt -l -r long_reads.fq.gz --strain -n
 ```
 * short read
 ```
 cd PanTax/example/ngs
 # species level
-pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --species-level -n
+pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --species -n
 # strain level
-pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --strain-level -n
+pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --strain -n
 ```
 
 ## Possible issues during installation
@@ -332,7 +412,7 @@ conda install pantax -c bioconda -c conda-forge -c gurobi
 
 ## Change
 
-### Version: V2.0.0 (update at 2024-08-09)
+### Version: V2.1.0 (update at 2026-01-27)
 
 <details>
 <summary>Click here to check the log of all updates</summary>
@@ -398,9 +478,26 @@ conda install pantax -c bioconda -c conda-forge -c gurobi
 * *Non NCBI named genomes (GCF_ASM_genomic.fna) are preserved in their original form and support the use of relative path in genomes_info file. <BR/>*
 * *Add docker. <BR/>*
 
+#### *__[Update - 2025 - 01 - 27]__* :  <BR/>
+*V2.1.0 <BR/>*
+* *In this release, the entire codebase has been rewritten using a single language, Rust, instead of the previous mixture of Shell, Python, and Rust. <BR/>*
+Because the dependency pggb is implemented in Shell, it is not feasible to expose or integrate it via a direct API (third-party interface). Other dependencies such as vg and GraphAligner are implemented in C++ and could, in principle, be called through APIs. However, vg is extremely complex to compile, and due to limited development time, this was not further explored.
+
+* *In addition, several new features have been introduced.<BR/>*
+(1) Long-read alignment can now be performed using vg, but the path to vg must be specified explicitly (version ≥ 1.71) with `--lr-aligner`.
+(2) For multi-sample analysis, a fast mode is available that allows building the index in advance and passing it via the `--syldb` parameter.
+(3) In the new version, species graph information is stored in serialized binary format (.bin) by default.
+(4) A new CPLEX solver has been added, which requires manually specifying the CPLEX installation path and compiling it locally.
+(5) PanTax is now distributed as multiple executables based on different solvers:
+pantax (gurobi, highs, cbc, glpk) — default
+pantax-gb (gurobi)
+pantax-cp (cplex)
+pantax-free (highs, cbc, glpk)
+The first one (pantax) uses the default solver configuration.
+
 ## TODO
-+ Performance comparison between `vg giraffe` long read alignment and `Graphaligner` alignment.
-+ Update `vg giraffe` command of new version `vg`. 
++ ~~Performance comparison between `vg giraffe` long read alignment and `Graphaligner` alignment.~~
++ ~~Update `vg giraffe` command of new version `vg`.~~
 
 ## Citation
 ```
@@ -413,3 +510,9 @@ conda install pantax -c bioconda -c conda-forge -c gurobi
   publisher={Cold Spring Harbor Laboratory}
 }
 ```
+
+## Patent Notice
+
+This software is protected by a granted Chinese Patent (Patent No. **ZL 2024 1 1096547.6**).
+
+For any commercial use, please contact the corresponding author for authorization: `xluo@hnu.edu.cn`

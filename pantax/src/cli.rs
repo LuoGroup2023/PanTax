@@ -75,15 +75,19 @@ pub struct Cli {
     #[arg(short = 'A', long, default_value_t = 99., help_heading = CLI_HEADINGS[1])]
     pub ani: f64,
 
-    /// Save species graph information.
-    #[arg(short = 'g', long, help_heading = CLI_HEADINGS[1])]
-    pub save: bool,
+    // /// Save species graph information.
+    // #[arg(short = 'g', long, help_heading = CLI_HEADINGS[1])]
+    // pub save: bool,
 
-    /// Serialized zip graph file saved with lz4 format (for save option).
+    /// Not serialize species graph information, save with gfa format.
+    #[arg(long, help_heading = CLI_HEADINGS[1])]
+    pub no_save: bool,
+
+    /// Serialized zip graph file saved with lz4 format.
     #[arg(long, help_heading = CLI_HEADINGS[1])]
     pub lz: bool,    
 
-    /// Serialized zip graph file saved with zstd format (for save option).
+    /// Serialized zip graph file saved with zstd format.
     #[arg(long, help_heading = CLI_HEADINGS[1])]
     pub zstd: bool,      
 
@@ -293,7 +297,7 @@ impl Cli {
     }
 
     pub fn is_save(&self) -> bool {
-        if self.save || self.lz || self.zstd {
+        if !self.no_save || self.lz || self.zstd {
             true
         } else {
             false

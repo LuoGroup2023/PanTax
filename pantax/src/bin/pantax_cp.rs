@@ -122,7 +122,7 @@ fn get_profiling_config(args: &mut Cli, global_config: &GlobalConfig) -> Result<
         if args.shift.as_ref().unwrap().to_lowercase() == "true".to_string() { shift = true }
     }
 
-    let zip = if args.save {
+    let zip = if !args.no_save {
         Some("serialize".to_string())
     } else if args.lz {
         Some("lz".to_string())

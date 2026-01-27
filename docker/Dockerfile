@@ -11,13 +11,13 @@ WORKDIR /tools
 COPY environment.yaml .
 RUN . /opt/conda/bin/activate && \
     conda env create -n pantax -f environment.yaml && \
-    conda install rust=1.82 clangdev=19 glpk && \
+    conda install rust=1.82 clangdev=19 glpk  && \
     conda clean -ya
 
 ENV GUROBI_HOME=/opt/conda/envs/pantax
-RUN git clone https://github.com/LuoGroup2023/PanTax.git -b rust_dev && \
-    bash install.sh v2 && \
-    cp scripts/pantax scripts/data_preprocessing scripts/pantax_utils scripts/pantaxr /opt/conda/envs/pantax/bin/ && \
+RUN git clone https://github.com/LuoGroup2023/PanTax.git -b all-rust && \
+    bash install.sh && \
+    cp scripts/pantax-rg scripts/pantax-utils scripts/pantax /opt/conda/envs/pantax/bin/ && \
     cp scripts/*py /opt/conda/envs/pantax/bin/
 ENV PATH=/opt/conda/envs/pantax/bin/:$PATH
 ENV LD_LIBRARY_PATH=/opt/conda/envs/pantax/lib:$LD_LIBRARY_PATH
