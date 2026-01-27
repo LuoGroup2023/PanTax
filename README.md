@@ -81,7 +81,7 @@ pantax -h
 
 * **From source**
 ```
-git clone https://github.com/LuoGroup2023/PanTax.git -b all-rust
+git clone https://github.com/LuoGroup2023/PanTax.git -b main
 conda create -n pantax
 conda activate pantax
 condas install -c bioconda -c conda-forge -c gurobi -c defaults \
