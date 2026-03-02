@@ -1,0 +1,5 @@
+genome_ID	strain_taxid	species_taxid	organism_name	id
+GCF_016406325.1_ASM1640632v1	24.1	24	known_strain	../genomes/GCF_016406325.1_ASM1640632v1_genomic.fna
+GCF_025402875.1_ASM2540287v1	24.2	24	known_strain	../genomes/GCF_025402875.1_ASM2540287v1_genomic.fna
+GCF_007747015.1_ASM774701v1	122.1	122	known_strain	../genomes/GCF_007747015.1_ASM774701v1_genomic.fna
+GCF_009720545.1_ASM972054v1	122.2	122	known_strain	../genomes/GCF_009720545.1_ASM972054v1_genomic.fna

@@ -129,9 +129,9 @@ pub fn load_gaf_file_lazy(file_path: &PathBuf) -> PolarsResult<DataFrame> {
             col("column_1").alias("read_id"),
             col("column_2").alias("read_len"),
             col("column_6").alias("path"),
-            col("column_7").alias("read_path_len"),
-            col("column_8").alias("read_start"),
-            col("column_9").alias("read_end"),
+            col("column_7").cast(DataType::Int64).alias("read_path_len"),
+            col("column_8").cast(DataType::Int64).alias("read_start"),
+            col("column_9").cast(DataType::Int64).alias("read_end"),
             col("column_12").alias("mapq")
         ])
         .collect()?;

@@ -49,6 +49,10 @@ name = "sylph"
 path = "src/bin/sketch.rs"
 
 [[bin]]
+name = "pantax-md"
+path = "src/bin/pantax_md.rs"
+
+[[bin]]
 name = "pantax-gb"
 path = "src/bin/pantax_gb.rs"
 

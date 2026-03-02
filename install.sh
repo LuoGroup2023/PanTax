@@ -44,3 +44,5 @@ else
     echo "Unknown solver option: $arg1"
     exit 1
 fi
+
+cp target/release/pantax-md "$basedir/scripts/pantax-md"
