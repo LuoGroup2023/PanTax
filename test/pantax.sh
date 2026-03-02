@@ -28,6 +28,16 @@ $pantax -s -p -r short_reads.fq.gz --strain -n -t 32
 $pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --species --strain -t 32 --fast
 
 #------------------------------------------
+# merge multiple database and profiling
+#------------------------------------------
+cd example
+mkdir -p test && cd test
+pantax -f ../example_genomes_info.txt --create -t 32 -d pantax_db1
+pantax -f ../example_genomes_info2.txt --create -t 32 -d pantax_db2
+pantax-md -i pantax_db1 pantax_db2 -t 32
+pantax -d pantax_md_db -s -p -r ../ngs/short_reads.fq.gz -t 32 --species --strain
+
+#------------------------------------------
 # other commands
 #------------------------------------------
 # create and index
@@ -41,6 +51,8 @@ $pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --create --ind
 awk -F'\t' 'NR>1 {print $5}' ../example_genomes_info.txt > genomes.txt
 sylph sketch -l genomes.txt -o genomes
 $pantax -f ../example_genomes_info.txt -s -p -r short_reads.fq.gz --create --index --fast --syldb genomes.syldb
+
+
 
 # long read
 # same as short read but use -l instead of -s
