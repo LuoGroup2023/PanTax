@@ -459,7 +459,7 @@ conda install pantax -c bioconda -c conda-forge -c gurobi
 * *Non NCBI named genomes (GCF_ASM_genomic.fna) are preserved in their original form and support the use of relative path in genomes_info file. <BR/>*
 * *Add docker. <BR/>*
 
-#### *__[Update - 2025 - 01 - 27]__* :  <BR/>
+#### *__[Update - 2026 - 01 - 27]__* :  <BR/>
 *V2.1.0 <BR/>*
 * *In this release, the entire codebase has been rewritten using a single language, Rust, instead of the previous mixture of Shell, Python, and Rust. <BR/>*
 Because the dependency pggb is implemented in Shell, it is not feasible to expose or integrate it via a direct API (third-party interface). Other dependencies such as vg and GraphAligner are implemented in C++ and could, in principle, be called through APIs. However, vg is extremely complex to compile, and due to limited development time, this was not further explored.
