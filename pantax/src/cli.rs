@@ -188,7 +188,7 @@ pub struct Cli {
     pub log_m: Option<String>,        
 
     /// log level
-    #[arg(long = "log", value_enum, default_value = "debug", help_heading = CLI_HEADINGS[6], hide = true)]
+    #[arg(long = "log", value_enum, default_value = "info", help_heading = CLI_HEADINGS[6], hide = true)]
     pub log_level: LogLevel,
 
     /// only query and filter.
