@@ -71,5 +71,5 @@ $pantax -f ../example_genomes_info.txt -l -r long_reads.fq.gz -t 32 --species --
 # pantax_free ------> support highs (default), cbc, glpk 
 # pantax_gb   ------> support gurobi 
 # pantax_cp   ------> support cplex  (Note that it need to build from source)
-pantax_free -f ../example_genomes_info.txt -l -r long_reads.fq.gz --species --strain -t 32
+pantax-free -f ../example_genomes_info.txt -l -r long_reads.fq.gz --species --strain -t 32
 
