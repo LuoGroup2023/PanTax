@@ -12,6 +12,8 @@ Read more about PanTax here:
 > [Strain-level metagenomic profiling using pangenome graphs with PanTax](https://genome.cshlp.org/content/early/2026/01/13/gr.280858.125)
 
 
+**For a collection of more profiling tools (species or/and strain), please refer to: [metagenome-profling-tools](https://github.com/zwh82/metagenome-profling-tools.git)**
+
 ## Table of Contents
 
 + [Overview](#overview)
