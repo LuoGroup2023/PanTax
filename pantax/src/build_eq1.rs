@@ -58,7 +58,7 @@ fn build_gfa_for_single_genome(species_taxid: &str, genome_path: &str, wd: &str,
     let mut w_lines = Vec::new();
 
     let mut node_id = 1;
-
+    let genome_records_len = genome_records.len();
     for (seqid, sequence) in genome_records {
         let seqid = seqid.split_whitespace().next().unwrap();
         let new_seqid = format!("{}#1#{}", genome_name, seqid);
@@ -98,7 +98,7 @@ fn build_gfa_for_single_genome(species_taxid: &str, genome_path: &str, wd: &str,
         return None;
     }
 
-    if w_lines.len() != 1 {
+    if w_lines.len() != genome_records_len {
         eprintln!("W lines error for taxid {}", species_taxid);
         return None;
     }
