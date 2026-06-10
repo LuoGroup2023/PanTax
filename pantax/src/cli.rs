@@ -242,6 +242,10 @@ pub struct Cli {
     /// test, for save ori_strain_abundance.txt
     #[arg(long, hide = true)]
     pub test: bool,    
+
+    /// number threshold for species
+    #[arg(long="st", hide = true)]
+    pub species_strain_threshold: Option<usize>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
