@@ -8,7 +8,7 @@ use crate::build_eq1::{parallel_build_gfa, parallel_convert_and_zip};
 use crate::sort_range::sort_range;
 use crate::stat::stat;
 use sylph::api::contain_new;
-use std::{collections::HashSet, path::Path};
+use std::{collections::{HashSet, HashMap}, path::Path};
 use std::fs::{self, create_dir_all, File, remove_dir_all, remove_file};
 use anyhow::{Result, anyhow};
 // use rayon::prelude::*;
@@ -39,6 +39,18 @@ pub fn construct(genomes_metadata: &mut Vec<GenomesInfo>, data_type: &DataType, 
                 contain_new(&reference_genomes_paths, &read_files, &out_prefix, is_interleaved)
             };
             query_res.retain(|x| x.2 >= args.ani);
+            // if args.species_strain_threshold.is_some() {
+            //     let threshold = args.species_strain_threshold.unwrap();
+            //     if query_res.len() > threshold {
+            //         log::warn!("Species threshold to filter genomes from sylph.");
+            //         query_res.sort_by(|a, b| {
+            //             b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal)
+            //         }); 
+            //         query_res.truncate(threshold);
+            //     }
+            // }
+
+
             // for (_, s, _) in query_res.iter_mut() {
             //     if let Some(first) = s.split_whitespace().next() {
             //         *s = first.to_string();
@@ -48,8 +60,31 @@ pub fn construct(genomes_metadata: &mut Vec<GenomesInfo>, data_type: &DataType, 
             //     .par_iter()
             //     .flat_map(|genomes_info| process_genome(&genomes_info.genome_id, &genomes_info.path_id))
             //     .collect();
-            let retained_genomes_path: Vec<String> = query_res.iter().map(|x| x.0.clone()).collect::<HashSet<String>>().into_iter().collect();
-            genomes_metadata.retain(|x| retained_genomes_path.contains(&x.path_id));
+
+            if args.species_strain_threshold.is_some() {
+                let threshold = args.species_strain_threshold.unwrap();
+                let path_to_species: HashMap<String, String> = genomes_metadata
+                    .iter()
+                    .map(|info| (info.path_id.clone(), info.species_taxid.clone()))
+                    .collect();  
+                query_res.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+                let mut species_counts: HashMap<String, usize> = HashMap::new();
+                let mut retained_paths = Vec::new();
+                for (path_id, _, _ani) in &query_res {
+                    if let Some(species_id) = path_to_species.get(path_id) {
+                        let count = species_counts.entry(species_id.clone()).or_insert(0);
+                        if *count < threshold {
+                            retained_paths.push(path_id.clone());
+                            *count += 1;
+                        }
+                    }
+                }
+                let retained_set: std::collections::HashSet<String> = retained_paths.into_iter().collect();
+                genomes_metadata.retain(|x| retained_set.contains(&x.path_id));                              
+            } else {
+                let retained_genomes_path: Vec<String> = query_res.iter().map(|x| x.0.clone()).collect::<HashSet<String>>().into_iter().collect();
+                genomes_metadata.retain(|x| retained_genomes_path.contains(&x.path_id));
+            }
             output_genomes_info(&genomes_metadata, &args.tmp_dir.join("sylph_db/filter_genomes_info.txt"))?;
             output_genomes_info(&genomes_metadata, &args.db.join("genomes_info.txt"))?;
             File::create(&global_config.query_done)?;
